@@ -4,6 +4,7 @@ import {cp, readFile, readdir, stat} from 'fs/promises';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {execFileSync} from 'child_process';
+import extract from 'extract-zip';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = path.join(rootDir, 'cloakbrowser.runtime.json');
@@ -48,7 +49,7 @@ mkdirSync(platformDir, {recursive: true});
 mkdirSync(extractDir, {recursive: true});
 
 if (archivePath.endsWith('.zip')) {
-  execFileSync('unzip', ['-q', archivePath, '-d', extractDir], {stdio: 'inherit'});
+  await extract(archivePath, {dir: extractDir});
 } else if (archivePath.endsWith('.tar.gz') || archivePath.endsWith('.tgz')) {
   execFileSync('tar', ['-xzf', archivePath, '-C', extractDir], {stdio: 'inherit'});
 } else {

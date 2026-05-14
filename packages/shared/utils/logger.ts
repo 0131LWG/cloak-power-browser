@@ -5,6 +5,36 @@ import {app} from 'electron';
 
 // const colorizer = winston.format.colorize();
 
+const formatLogMeta = (item: unknown): string => {
+  if (item instanceof Error) {
+    return JSON.stringify({
+      name: item.name,
+      message: item.message,
+      stack: item.stack,
+      code: (item as NodeJS.ErrnoException).code,
+    });
+  }
+
+  if (typeof item === 'string') {
+    return item;
+  }
+
+  try {
+    const seen = new WeakSet<object>();
+    return JSON.stringify(item, (_key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+  } catch (error) {
+    return String(item);
+  }
+};
+
 export function createLogger(label: string) {
   const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -47,7 +77,7 @@ export function createLogger(label: string) {
           const {timestamp, level, message, [Symbol.for('splat')]: splat} = info;
           const metaString =
             splat && Array.isArray(splat) && splat.length
-              ? splat.map(item => JSON.stringify(item)).join(' ')
+              ? splat.map(item => formatLogMeta(item)).join(' ')
               : '';
           const formattedMessage = `${message} ${metaString}`.trim();
           return `${label} | ${timestamp} - ${level}: ${formattedMessage}`;

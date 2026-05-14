@@ -3,6 +3,7 @@ import {createReadStream, createWriteStream, existsSync, mkdirSync, rmSync} from
 import {cp, readFile, readdir, stat} from 'fs/promises';
 import {execFileSync} from 'child_process';
 import {app} from 'electron';
+import extract from 'extract-zip';
 import https from 'https';
 import path from 'path';
 import {createLogger} from '../../../shared/utils/logger';
@@ -95,7 +96,7 @@ const downloadAndPrepareRuntime = async (runtime: CloakBrowserRuntimeOption) => 
   }
 
   if (runtime.asset.endsWith('.zip')) {
-    execFileSync('unzip', ['-q', archivePath, '-d', extractDir], {stdio: 'ignore'});
+    await extract(archivePath, {dir: extractDir});
   } else if (runtime.asset.endsWith('.tar.gz') || runtime.asset.endsWith('.tgz')) {
     execFileSync('tar', ['-xzf', archivePath, '-C', extractDir], {stdio: 'ignore'});
   } else {
