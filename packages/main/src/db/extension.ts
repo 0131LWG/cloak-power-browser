@@ -1,12 +1,28 @@
 import {db} from '.';
 import type {DB} from '../../../shared/types/db';
 
+const normalizeExtension = (extension: DB.Extension): DB.Extension => {
+  return {
+    ...extension,
+    source_type: extension.source_type ?? 'custom',
+    distribution_mode: extension.distribution_mode ?? 'manual',
+    auto_update: typeof extension.auto_update === 'boolean' ? extension.auto_update : extension.auto_update !== 0,
+  };
+};
+
 const getAllExtensions = async () => {
-  return await db('extension').select('*');
+  const rows = await db('extension').select('*').orderBy('created_at', 'desc');
+  return rows.map(row => normalizeExtension(row as DB.Extension));
 };
 
 const getExtensionById = async (id: number) => {
-  return await db('extension').where({id}).first();
+  const row = await db('extension').where({id}).first();
+  return row ? normalizeExtension(row as DB.Extension) : undefined;
+};
+
+const getExtensionByChromeId = async (chromeExtensionId: string) => {
+  const row = await db('extension').where({chrome_extension_id: chromeExtensionId}).first();
+  return row ? normalizeExtension(row as DB.Extension) : undefined;
 };
 
 const createExtension = async (extension: DB.Extension) => {
@@ -28,22 +44,46 @@ const updateExtension = async (id: number, extension: Partial<DB.Extension>) => 
 };
 
 const insertExtensionWindows = async (id: number, windows: number[]) => {
-  for (const windowId of windows) {
-    await db('window_extension').insert({extension_id: id, window_id: windowId});
+  if (!windows.length) {
+    return [];
   }
+
+  const existingRows = await db('window_extension')
+    .where({extension_id: id})
+    .whereIn('window_id', windows)
+    .select('window_id');
+  const existingIds = new Set(existingRows.map(row => row.window_id));
+  const payload = windows
+    .filter(windowId => !existingIds.has(windowId))
+    .map(windowId => ({extension_id: id, window_id: windowId}));
+
+  if (!payload.length) {
+    return [];
+  }
+
+  return await db('window_extension').insert(payload);
 };
 
 const getExtensionsByWindowId = async (windowId: number) => {
   const extensionIds = await db('window_extension')
     .where({window_id: windowId})
     .select('extension_id');
-  return await db('extension').whereIn(
-    'id',
-    extensionIds.map(e => e.extension_id),
-  );
+  const ids = extensionIds.map(e => e.extension_id);
+
+  const query = db('extension').select('*').where({distribution_mode: 'global'});
+  if (ids.length > 0) {
+    query.orWhereIn('id', ids);
+  }
+
+  const rows = await query.orderBy('created_at', 'desc');
+  return rows.map(row => normalizeExtension(row as DB.Extension));
 };
 
 const deleteExtensionWindows = async (id: number, windowIds: number[]) => {
+  if (!windowIds.length) {
+    return 0;
+  }
+
   return await db('window_extension')
     .where({extension_id: id})
     .whereIn('window_id', windowIds)
@@ -57,24 +97,18 @@ const deleteWindowReleted = async (windowIds: number | number[]) => {
 };
 
 const getExtensionWindows = async (id: number) => {
-  return await db('window_extension').where({extension_id: id});
+  return await db('window_extension').where({extension_id: id}).orderBy('created_at', 'asc');
 };
 
 const deleteExtension = async (id: number) => {
-  const relatedWindows = await getExtensionWindows(id);
-  if (relatedWindows.length > 0) {
-    return {
-      success: false,
-      message: 'Extension is still in use',
-    };
-  } else {
-    return await db('extension').where({id}).delete();
-  }
+  await db('window_extension').where({extension_id: id}).delete();
+  return await db('extension').where({id}).delete();
 };
 
 export const ExtensionDB = {
   getAllExtensions,
   getExtensionById,
+  getExtensionByChromeId,
   createExtension,
   updateExtension,
   deleteExtension,

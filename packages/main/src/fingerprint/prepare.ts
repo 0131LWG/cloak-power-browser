@@ -133,10 +133,10 @@ const getRealIP = async (proxy: DB.Proxy) => {
   }
 };
 
-export const getProxyInfo = async (proxy: DB.Proxy) => {
+export const getProxyInfo = async (proxy: DB.Proxy, proxyUrl?: string) => {
   let attempts = 0;
   const maxAttempts = 3;
-  const realIP = await getRealIP(proxy);
+  const realIP = proxyUrl ? await getRealIPFromUrl(proxyUrl) : await getRealIP(proxy);
   const params = {
     ip: realIP,
   };
@@ -158,6 +158,32 @@ export const getProxyInfo = async (proxy: DB.Proxy) => {
         );
       }
     }
+  }
+};
+
+const getRealIPFromUrl = async (proxyUrl: string) => {
+  try {
+    const agent = proxyUrl.startsWith('socks')
+      ? new SocksProxyAgent(proxyUrl)
+      : proxyUrl.startsWith('https://')
+      ? new HttpsProxyAgent(proxyUrl)
+      : new HttpProxyAgent(proxyUrl);
+    const {data} = await axios.get('https://ipinfo.io/json', {
+      proxy: false,
+      timeout: 5_000,
+      httpAgent: agent,
+      httpsAgent: agent,
+      validateStatus: status => status >= 200 && status < 300,
+      maxRedirects: 5,
+    });
+    return data.ip;
+  } catch (error) {
+    bridgeMessageToUI({
+      type: 'error',
+      text: `获取真实IP失败: ${(error as {message: string}).message}`,
+    });
+    logger.error(`| Prepare | getRealIPFromUrl | error: ${(error as {message: string}).message}`);
+    return '';
   }
 };
 

@@ -1,13 +1,39 @@
-import {Form, Input, Select, Row, Col, Space, Typography, message} from 'antd';
+import {Form, Input, Select, Row, Col, Space, Typography, message, InputNumber, Divider} from 'antd';
 import AddableSelect from '/@/components/addable-select';
 import {useEffect, useState} from 'react';
 import type {DB} from '../../../../../../shared/types/db';
-import {GroupBridge, TagBridge, ProxyBridge} from '#preload';
+import {GroupBridge, TagBridge, ProxyBridge, WindowBridge} from '#preload';
 import {TAG_COLORS} from '/@/constants';
 import {useTranslation} from 'react-i18next';
 
 const {TextArea} = Input;
 const {Text} = Typography;
+
+interface RuntimeOption {
+  tag: string;
+  asset: string;
+  recommended?: boolean;
+  downloaded?: boolean;
+  notes?: string;
+}
+
+const browserEngineOptions = [
+  {label: '原 Chromium', value: 'chromium'},
+  {label: '本机 Chrome', value: 'chrome'},
+  {label: 'CloakBrowser', value: 'cloakbrowser'},
+];
+
+const platformOptions = [
+  {label: 'macOS', value: 'macos'},
+  {label: 'Windows', value: 'windows'},
+  {label: 'Linux', value: 'linux'},
+];
+
+const webrtcOptions = [
+  {label: 'Auto', value: 'auto'},
+  {label: 'Default', value: 'default'},
+  {label: 'Disabled', value: 'disabled'},
+];
 
 const WindowEditForm = ({
   formValue,
@@ -22,6 +48,8 @@ const WindowEditForm = ({
   const [groups, setGroups] = useState<DB.Group[]>([]);
   const [tags, setTags] = useState<DB.Tag[]>([]);
   const [proxies, setProxies] = useState<DB.Proxy[]>([]);
+  const [runtimePlatform, setRuntimePlatform] = useState('');
+  const [cloakBrowserRuntimes, setCloakBrowserRuntimes] = useState<RuntimeOption[]>([]);
   const {t} = useTranslation();
   const [messageApi, contextHolder] = message.useMessage({
     duration: 3,
@@ -32,7 +60,7 @@ const WindowEditForm = ({
     if (JSON.stringify(formValue) === '{}') {
       form?.resetFields();
     } else {
-      form?.setFieldsValue(formValue);
+      form?.setFieldsValue(normalizeFormValue(formValue));
     }
   }, [formValue]);
 
@@ -48,11 +76,17 @@ const WindowEditForm = ({
     const proxies = await ProxyBridge?.getAll();
     setProxies(proxies);
   };
+  const fetchCloakBrowserRuntimes = async () => {
+    const result = await WindowBridge?.getCloakBrowserRuntimes();
+    setRuntimePlatform(result?.platform || '');
+    setCloakBrowserRuntimes(result?.runtimes || []);
+  };
 
   useEffect(() => {
     fetchGroups();
     fetchTags();
     fetchProxies();
+    fetchCloakBrowserRuntimes();
   }, []);
 
   const onAddGroup = async (name: string) => {
@@ -106,6 +140,32 @@ const WindowEditForm = ({
   };
 
   type FieldType = DB.Window;
+  const selectedBrowserEngine = Form.useWatch('browser_engine', form);
+
+  useEffect(() => {
+    if (!runtimePlatform) {
+      return;
+    }
+
+    if (!selectedBrowserEngine) {
+      form.setFieldValue('browser_engine', 'cloakbrowser');
+      form.setFieldValue('browser_runtime_platform', runtimePlatform);
+      const recommended = cloakBrowserRuntimes.find(runtime => runtime.recommended);
+      form.setFieldValue('browser_version', recommended?.tag || cloakBrowserRuntimes[0]?.tag);
+      return;
+    }
+
+    if (selectedBrowserEngine !== 'cloakbrowser') {
+      return;
+    }
+
+    const currentVersion = form.getFieldValue('browser_version');
+    form.setFieldValue('browser_runtime_platform', runtimePlatform);
+    if (!currentVersion) {
+      const recommended = cloakBrowserRuntimes.find(runtime => runtime.recommended);
+      form.setFieldValue('browser_version', recommended?.tag || cloakBrowserRuntimes[0]?.tag);
+    }
+  }, [selectedBrowserEngine, runtimePlatform, cloakBrowserRuntimes, form]);
 
   return (
     <Form
@@ -225,6 +285,129 @@ const WindowEditForm = ({
         <Input />
       </Form.Item>
 
+      <Divider orientation="left">Browser Runtime</Divider>
+
+      <Form.Item<FieldType>
+        label="Kernel"
+        name="browser_engine"
+        tooltip="选择这个 profile 打开时使用的浏览器内核。"
+      >
+        <Select
+          placeholder="CloakBrowser"
+          options={browserEngineOptions}
+        />
+      </Form.Item>
+
+      {selectedBrowserEngine === 'cloakbrowser' && (
+        <>
+          <Form.Item<FieldType>
+            label="Platform"
+            name="browser_runtime_platform"
+            tooltip="运行时平台由当前系统自动决定；macOS 和 Windows 的可选版本不同。"
+          >
+            <Input
+              disabled
+              placeholder={runtimePlatform}
+            />
+          </Form.Item>
+
+          <Form.Item<FieldType>
+            label="Version"
+            name="browser_version"
+            tooltip="未下载的版本会在打开窗口前自动从 CloakBrowser GitHub Releases 下载。"
+          >
+            <Select
+              allowClear
+              placeholder="Recommended"
+              options={cloakBrowserRuntimes.map(runtime => ({
+                label: `${runtime.tag}${runtime.recommended ? ' · 推荐' : ''}${
+                  runtime.downloaded ? ' · 已下载' : ' · 未下载'
+                }`,
+                value: runtime.tag,
+              }))}
+              notFoundContent="当前平台没有配置 CloakBrowser runtime"
+            />
+          </Form.Item>
+        </>
+      )}
+
+      <Divider orientation="left">CloakBrowser Fingerprint</Divider>
+
+      <Form.Item
+        label="Seed"
+        name={['fingerprint', 'fingerprintSeed']}
+        tooltip="同一个 profile 建议使用固定 seed；留空时会根据 profile_id 自动生成。"
+      >
+        <Input placeholder="例如 62655" />
+      </Form.Item>
+
+      <Form.Item
+        label="Platform"
+        name={['fingerprint', 'platform']}
+      >
+        <Select
+          allowClear
+          placeholder="默认 macOS"
+          options={platformOptions}
+        />
+      </Form.Item>
+
+      <Form.Item
+        label="Timezone"
+        name={['fingerprint', 'timezone']}
+        tooltip="留空时会根据代理 IP 自动推断。"
+      >
+        <Input placeholder="例如 Asia/Tokyo" />
+      </Form.Item>
+
+      <Form.Item
+        label="Locale"
+        name={['fingerprint', 'locale']}
+        tooltip="留空时会根据代理国家自动推断。"
+      >
+        <Input placeholder="例如 ja-JP" />
+      </Form.Item>
+
+      <Form.Item
+        label="Screen"
+      >
+        <Space.Compact block>
+          <Form.Item
+            name={['fingerprint', 'screenWidth']}
+            noStyle
+          >
+            <InputNumber
+              min={320}
+              max={7680}
+              style={{width: '50%'}}
+              placeholder="Width"
+            />
+          </Form.Item>
+          <Form.Item
+            name={['fingerprint', 'screenHeight']}
+            noStyle
+          >
+            <InputNumber
+              min={240}
+              max={4320}
+              style={{width: '50%'}}
+              placeholder="Height"
+            />
+          </Form.Item>
+        </Space.Compact>
+      </Form.Item>
+
+      <Form.Item
+        label="WebRTC"
+        name={['fingerprint', 'webrtcPolicy']}
+      >
+        <Select
+          allowClear
+          placeholder="Auto"
+          options={webrtcOptions}
+        />
+      </Form.Item>
+
       {/* <Form.Item<FieldType>
         name="cookie"
         label="Cookie"
@@ -241,3 +424,21 @@ const WindowEditForm = ({
 };
 
 export default WindowEditForm;
+
+const normalizeFormValue = (value: DB.Window) => {
+  if (!value?.fingerprint || typeof value.fingerprint !== 'string') {
+    return value;
+  }
+
+  try {
+    return {
+      ...value,
+      fingerprint: JSON.parse(value.fingerprint),
+    };
+  } catch {
+    return {
+      ...value,
+      fingerprint: {},
+    };
+  }
+};

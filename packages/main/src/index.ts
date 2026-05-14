@@ -75,7 +75,8 @@ app
     try {
       await initializeDatabase();
     } catch (error) {
-      const errorString = error && typeof error === 'string' ? error : JSON.stringify(error);
+      const errorString =
+        error instanceof Error ? `${error.message}\n${error.stack || ''}` : JSON.stringify(error);
       logger.error(`Failed initialize database: ${errorString}`);
     }
     await initServices();

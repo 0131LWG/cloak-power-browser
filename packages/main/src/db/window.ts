@@ -2,6 +2,7 @@ import {db} from '.';
 import type {DB, SafeAny} from '../../../shared/types/db';
 import type {IWindowTemplate} from '../types/window-template';
 import {GroupDB} from './group';
+import {ProxyDB} from './proxy';
 import {randomUniqueProfileId} from '../../../shared/utils/random';
 
 const all = async () => {
@@ -19,6 +20,9 @@ const all = async () => {
       'window.profile_id',
       'window.opened_at',
       'window.ua',
+      'window.browser_engine',
+      'window.browser_runtime_platform',
+      'window.browser_version',
       'window.status',
       'group.name as group_name',
       'proxy.ip',
@@ -51,6 +55,9 @@ const getOpenedWindows = async () => {
       'window.ua',
       'window.status',
       'window.fingerprint',
+      'window.browser_engine',
+      'window.browser_runtime_platform',
+      'window.browser_version',
       'group.name as group_name',
       'proxy.ip',
       'proxy.proxy',
@@ -131,6 +138,9 @@ const getByPid = async (pid: number) => {
 };
 
 const update = async (id: number, updatedData: DB.Window) => {
+  if (updatedData.fingerprint && typeof updatedData.fingerprint !== 'string') {
+    updatedData.fingerprint = JSON.stringify(updatedData.fingerprint);
+  }
   delete updatedData.group_name;
   delete updatedData.proxy;
   delete updatedData.proxy_type;
@@ -172,7 +182,10 @@ const create = async (windowData: DB.Window, fingerprint?: SafeAny) => {
       windowData.profile_id = randomUniqueProfileId();
     }
   }
-  if (fingerprint) {
+  if (windowData.fingerprint && typeof windowData.fingerprint !== 'string') {
+    windowData.ua = windowData.fingerprint.ua || windowData.ua;
+    windowData.fingerprint = JSON.stringify(windowData.fingerprint);
+  } else if (fingerprint) {
     windowData.ua = fingerprint.ua;
     windowData.fingerprint = JSON.stringify(fingerprint);
   }
@@ -181,15 +194,22 @@ const create = async (windowData: DB.Window, fingerprint?: SafeAny) => {
   //   windowData.ua = randFingerprint.ua;
   //   windowData.fingerprint = JSON.stringify(randFingerprint);
   // }
-  const [id] = await db('window').insert(windowData);
-  return {
-    success: true,
-    message: 'Window created successfully.',
-    data: {
-      ...windowData,
-      id,
-    },
-  };
+  try {
+    const [id] = await db('window').insert(windowData);
+    return {
+      success: true,
+      message: 'Window created successfully.',
+      data: {
+        ...windowData,
+        id,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to create window.' + error,
+    };
+  }
 };
 
 const remove = async (id: number) => {
@@ -230,6 +250,105 @@ const batchClear = async (ids: number[]) => {
   }
 };
 
+const normalizeImportText = (value: unknown) => String(value ?? '').trim();
+
+const getImportText = (row: IWindowTemplate, keys: string[]) => {
+  for (const key of keys) {
+    const value = normalizeImportText(row[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+};
+
+const getImportNumber = (row: IWindowTemplate, keys: string[]) => {
+  const value = getImportText(row, keys);
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+};
+
+const normalizeBrowserEngine = (value: string) => {
+  const engine = value.trim().toLowerCase();
+  if (engine === 'chrome' || engine === 'local-chrome' || engine === '本机chrome') {
+    return 'chrome';
+  }
+  if (engine === 'chromium' || engine === '原chromium') {
+    return 'chromium';
+  }
+  return 'cloakbrowser';
+};
+
+const buildImportedFingerprint = (row: IWindowTemplate): DB.WindowFingerprint => {
+  const fingerprint: DB.WindowFingerprint = {};
+  const ua = getImportText(row, ['ua', 'user_agent', 'User Agent', 'UA']);
+  const fingerprintSeed = getImportText(row, [
+    'fingerprint_seed',
+    'fingerprintSeed',
+    'seed',
+    'Seed',
+    '指纹种子',
+  ]);
+  const locale = getImportText(row, ['locale', 'Locale', '语言', '语言环境']);
+  const timezone = getImportText(row, ['timezone', 'timeZone', 'Timezone', '时区']);
+  const platform = getImportText(row, ['platform', 'Platform', '指纹平台']);
+  const webrtcPolicy = getImportText(row, [
+    'webrtc_policy',
+    'webrtcPolicy',
+    'WebRTC',
+    'webrtc',
+  ]);
+  const screenWidth = getImportNumber(row, ['screen_width', 'screenWidth', '屏幕宽度']);
+  const screenHeight = getImportNumber(row, ['screen_height', 'screenHeight', '屏幕高度']);
+
+  if (ua) fingerprint.ua = ua;
+  if (fingerprintSeed) fingerprint.fingerprintSeed = fingerprintSeed;
+  if (locale) fingerprint.locale = locale;
+  if (timezone) fingerprint.timezone = timezone;
+  if (platform) fingerprint.platform = platform;
+  if (webrtcPolicy) fingerprint.webrtcPolicy = webrtcPolicy;
+  if (screenWidth) fingerprint.screenWidth = screenWidth;
+  if (screenHeight) fingerprint.screenHeight = screenHeight;
+
+  return fingerprint;
+};
+
+const normalizeImportedProxy = (value: string) => {
+  const proxyText = value.trim();
+  const protocolMatch = proxyText.match(/^([a-z0-9]+):\/\//i);
+  const protocol = protocolMatch ? protocolMatch[1].toLowerCase() : '';
+  const proxy = protocolMatch ? proxyText.slice(protocolMatch[0].length) : proxyText;
+
+  return {
+    proxy_type: protocol === 'http' ? 'http' : 'socks5',
+    proxy,
+  };
+};
+
+const resolveImportedProxyId = async (row: IWindowTemplate) => {
+  const proxyValue = getImportText(row, ['proxy', 'proxy_ip', 'Proxy', 'Proxy IP', '代理IP', '代理']);
+  if (proxyValue) {
+    const proxy = normalizeImportedProxy(proxyValue);
+    const existingProxy = await ProxyDB.getByProxy(proxy.proxy_type, proxy.proxy);
+    if (existingProxy?.id) {
+      return existingProxy.id;
+    }
+
+    const [id] = await ProxyDB.create({
+      proxy_type: proxy.proxy_type,
+      proxy: proxy.proxy,
+      ip_checker: 'ip2location',
+    });
+
+    return id ?? null;
+  }
+
+  const proxyId = getImportText(row, ['proxyid', 'proxy_id', 'Proxy ID']);
+
+  return proxyId ? Number(proxyId) : null;
+};
+
 const externalImport = async (fileData: IWindowTemplate[]) => {
   const newWindowAdded = [];
   for (let index = 0; index < fileData.length; index++) {
@@ -248,13 +367,30 @@ const externalImport = async (fileData: IWindowTemplate[]) => {
       }
     }
     const window: DB.Window = {
-      name: row.name,
+      name: getImportText(row, ['name', 'Name', '名称']) || row.name,
       group_id: newGroupId,
-      profile_id: row.id as string,
-      proxy_id: row.proxyid ? Number(row.proxyid) : null,
-      ua: row.ua,
-      remark: row.remark,
-      cookie: row.cookie,
+      profile_id: getImportText(row, ['id', 'profile_id', 'profileId', 'Profile ID']),
+      proxy_id: await resolveImportedProxyId(row),
+      ua: getImportText(row, ['ua', 'user_agent', 'User Agent', 'UA']),
+      remark: getImportText(row, ['remark', 'Remark', '备注']),
+      cookie: getImportText(row, ['cookie', 'Cookie']),
+      browser_engine: normalizeBrowserEngine(
+        getImportText(row, ['browser_engine', 'kernel', 'Kernel', '浏览器内核']),
+      ),
+      browser_runtime_platform: getImportText(row, [
+        'browser_runtime_platform',
+        'runtime_platform',
+        'Runtime Platform',
+        '运行平台',
+      ]),
+      browser_version: getImportText(row, [
+        'browser_version',
+        'runtime_version',
+        'Version',
+        'CloakBrowser Version',
+        '内核版本',
+      ]),
+      fingerprint: buildImportedFingerprint(row),
     };
     // const fingerprint = randomFingerprint();
     const result = await WindowDB.create(window, {});

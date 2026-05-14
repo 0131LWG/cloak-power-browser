@@ -1,0 +1,16 @@
+{
+  "name": "@cloak-power/sdk",
+  "version": "0.1.0",
+  "description": "Client SDK for connecting automation projects to cloak-power-browser profiles with wrapper-style humanize behavior.",
+  "type": "module",
+  "main": "./index.mjs",
+  "module": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs"
+    }
+  },
+  "sideEffects": false
+}

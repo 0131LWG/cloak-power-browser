@@ -34,8 +34,9 @@ module.exports = async function () {
       'packages/**/assets/**',
       'migrations',
       'package.json',
+      'cloakbrowser.runtime.json',
       'node_modules/sqlite3/lib/binding/**/*.node',
-      'node_modules/@tkomde/iohook/**/*.node',
+      'node_modules/@tkomde/iohook/**/*',
       'node_modules/iconv-corefoundation/lib/*.node',
       'buildResources/**/*',
     ],
@@ -59,7 +60,7 @@ module.exports = async function () {
       main: './packages/main/dist/index.cjs',
     },
     asar: true,
-    asarUnpack: '**/*.{node,dll}',
+    asarUnpack: ['**/*.{node,dll,so}', 'node_modules/@tkomde/iohook/builds/**/*'],
 
     // Windows 配置
     win: {
@@ -163,7 +164,11 @@ module.exports = async function () {
 
       console.log(`Copying window-addon for ${electronPlatformName}-${archString}...`);
 
-      const sourcePath = path.join(__dirname, `packages/main/src/native-addon/build/Release/${electronPlatformName}-${archString}/window-addon.node`);
+      const sourceCandidates = [
+        path.join(__dirname, `packages/main/src/native-addon/build/Release/${electronPlatformName}-${archString}/window-addon.node`),
+        path.join(__dirname, 'packages/main/src/native-addon/build/Release/window-addon.node'),
+      ];
+      const sourcePath = sourceCandidates.find(candidate => fs.existsSync(candidate));
 
       // Mac 应用有 .app 包结构，需要特殊处理路径
       let targetDir;
@@ -177,8 +182,8 @@ module.exports = async function () {
 
       try {
         // 检查源文件是否存在
-        if (!fs.existsSync(sourcePath)) {
-          console.error(`Source file not found: ${sourcePath}`);
+        if (!sourcePath) {
+          console.error(`Source file not found. Tried: ${sourceCandidates.join(', ')}`);
           console.error('Please run npm run build:native-addon first');
           throw new Error('window-addon.node not found');
         }

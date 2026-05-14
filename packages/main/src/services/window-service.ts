@@ -1,5 +1,6 @@
 import {ipcMain} from 'electron';
-import {readFileSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
+import {rm} from 'fs/promises';
 import {txtToJSON} from '../utils/txt-to-json';
 import * as XLSX from 'xlsx';
 import type {IWindowTemplate} from '../types/window-template';
@@ -9,12 +10,76 @@ import {closeFingerprintWindow, openFingerprintWindow} from '../fingerprint/inde
 import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
 import {randomASCII, randomFloat, randomInt} from '../../../shared/utils';
-import path from 'path';
+import path, {isAbsolute, relative, resolve as resolvePath} from 'path';
 import puppeteer from 'puppeteer';
 import {presetCookie} from '../puppeteer/helpers';
 import {ExtensionDB} from '../db/extension';
 import * as ExcelJS from 'exceljs';
+import {getRuntimePlatformKey, listCloakBrowserRuntimes} from '../cloakbrowser/runtime-manager';
+import {getSettings} from '../utils/get-settings';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
+
+const isPathInside = (root: string, target: string) => {
+  const relativePath = relative(root, target);
+  return Boolean(relativePath) && !relativePath.startsWith('..') && !isAbsolute(relativePath);
+};
+
+const clearWindowCache = async (ids: number[]) => {
+  const settings = getSettings();
+  const cachePath = resolvePath(settings.profileCachePath);
+  const cacheDirNames = ['cloakbrowser', 'chrome', 'chromium'];
+  const results = {
+    cleared: [] as number[],
+    skipped: [] as {id: number; reason: string}[],
+    failed: [] as {id: number; reason: string}[],
+  };
+
+  for (const id of ids) {
+    try {
+      const windowData = await WindowDB.getById(id);
+
+      if (!windowData) {
+        results.skipped.push({id, reason: 'Window not found'});
+        continue;
+      }
+
+      if (windowData.status && windowData.status > 1) {
+        results.skipped.push({id, reason: 'Window is running'});
+        continue;
+      }
+
+      if (!windowData.profile_id) {
+        results.skipped.push({id, reason: 'Profile ID is empty'});
+        continue;
+      }
+
+      for (const cacheDirName of cacheDirNames) {
+        const cacheRoot = resolvePath(cachePath, cacheDirName);
+        const targetPath = resolvePath(cacheRoot, windowData.profile_id);
+
+        if (!isPathInside(cacheRoot, targetPath)) {
+          results.failed.push({id, reason: 'Invalid cache path'});
+          continue;
+        }
+
+        if (existsSync(targetPath)) {
+          await rm(targetPath, {recursive: true, force: true});
+        }
+      }
+
+      results.cleared.push(id);
+    } catch (error) {
+      logger.error(`Failed to clear window cache ${id}`, error);
+      results.failed.push({id, reason: (error as Error)?.message || String(error)});
+    }
+  }
+
+  return {
+    success: results.failed.length === 0,
+    message: `Cleared ${results.cleared.length} window cache(s).`,
+    data: results,
+  };
+};
 export const initWindowService = () => {
   logger.info('init window service...');
   ipcMain.handle('window-import', async (_, filePath: string) => {
@@ -61,6 +126,9 @@ export const initWindowService = () => {
   ipcMain.handle('window-batchDelete', async (_, ids: number[]) => {
     await ExtensionDB.deleteWindowReleted(ids);
     return await WindowDB.batchRemove(ids);
+  });
+  ipcMain.handle('window-clear-cache', async (_, ids: number[]) => {
+    return await clearWindowCache(ids);
   });
 
   ipcMain.handle('window-getAll', async () => {
@@ -110,6 +178,14 @@ export const initWindowService = () => {
 
   ipcMain.handle('window-getById', async (_, id: number) => {
     return await WindowDB.getById(id);
+  });
+
+  ipcMain.handle('window-cloakbrowser-runtimes', async () => {
+    const platform = getRuntimePlatformKey();
+    return {
+      platform,
+      runtimes: await listCloakBrowserRuntimes(platform),
+    };
   });
 
   ipcMain.handle('window-open', async (_, id: number) => {

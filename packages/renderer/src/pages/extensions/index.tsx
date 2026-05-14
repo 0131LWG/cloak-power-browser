@@ -1,685 +1,799 @@
+import type {MenuProps} from 'antd';
 import {
+  Avatar,
   Button,
   Card,
-  Col,
-  Row,
-  Upload,
-  Modal,
-  Space,
-  message,
-  Typography,
-  Spin,
+  Checkbox,
+  Dropdown,
+  Empty,
   Form,
   Input,
-  Checkbox,
-  Divider,
-  Dropdown,
+  List,
+  message,
+  Modal,
+  Radio,
   Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
 } from 'antd';
-import {useEffect, useState} from 'react';
-import {useTranslation} from 'react-i18next';
+import type {ColumnsType} from 'antd/es/table';
 import {
-  PlusOutlined,
-  CloudUploadOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  MoreOutlined,
+  AppstoreAddOutlined,
+  CheckOutlined,
   DeleteOutlined,
-  SyncOutlined,
-  ExclamationCircleFilled,
+  FolderOpenOutlined,
+  GlobalOutlined,
+  MoreOutlined,
   SearchOutlined,
+  SettingOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
-import type {CheckboxProps, MenuProps, UploadProps} from 'antd';
-import {ExtensionBridge, WindowBridge, GroupBridge} from '#preload';
+import _ from 'lodash';
+import {useEffect, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {CommonBridge, ExtensionBridge, GroupBridge, WindowBridge} from '#preload';
 import type {DB} from '../../../../shared/types/db';
-import type {UploadFile} from 'antd/es/upload/interface';
-import {debounce} from 'lodash';
-import {containsKeyword} from '/@/utils/str';
-import type {SearchProps} from 'antd/es/input';
 
-const {Text} = Typography;
-const {Meta} = Card;
+const {Paragraph, Text} = Typography;
 
-const CheckboxGroup = Checkbox.Group;
+type InstallFormValues = {
+  source_type: 'chrome_web_store' | 'custom';
+  source_url?: string;
+  directory_path?: string;
+};
+
+const PAGE_OFFSET = 266;
+
+const normalizeExtension = (extension: DB.Extension) => ({
+  ...extension,
+  distribution_mode: extension.distribution_mode === 'manual' ? 'manual' : 'global',
+  auto_update:
+    typeof extension.auto_update === 'boolean' ? extension.auto_update : extension.auto_update !== 0,
+});
+
+const matchWindowKeyword = (windowItem: DB.Window, keyword: string) => {
+  if (!keyword) {
+    return true;
+  }
+
+  const normalizedKeyword = keyword.toLowerCase();
+  return [windowItem.id, windowItem.name, windowItem.group_name, windowItem.profile_id]
+    .filter(Boolean)
+    .some(value => value!.toString().toLowerCase().includes(normalizedKeyword));
+};
 
 const Extensions = () => {
-  const {t} = useTranslation();
-  const [loading, setLoading] = useState(false);
-  const [extensions, setExtensions] = useState<DB.Extension[]>([]);
+  const {i18n, t} = useTranslation();
+  const isZh = i18n.language.startsWith('zh');
+  const labels = useMemo(
+    () => ({
+      upload: isZh ? '上传扩展' : 'Upload Extension',
+      refresh: isZh ? '刷新' : 'Refresh',
+      extensionColumn: isZh ? '扩展' : 'Extension',
+      sourceColumn: isZh ? '来源' : 'Source',
+      distributionColumn: isZh ? '分配方式' : 'Distribution',
+      actionColumn: isZh ? '操作' : 'Action',
+      chromeWebStore: isZh ? '谷歌应用商店' : 'Chrome Web Store',
+      customExtension: isZh ? '自建扩展' : 'Custom Extension',
+      extensionUrl: isZh ? '扩展 URL' : 'Extension URL',
+      extensionDirectory: isZh ? '扩展目录' : 'Extension Directory',
+      extensionUrlPlaceholder: isZh
+        ? '请输入 Chrome 应用商店中的扩展详情 URL'
+        : 'Enter the Chrome Web Store extension URL',
+      extensionDirectoryPlaceholder: isZh
+        ? '请选择已解压的扩展目录'
+        : 'Choose an unpacked extension directory',
+      chooseDirectory: isZh ? '选择目录' : 'Choose Directory',
+      sourceRequired: isZh ? '请输入扩展地址' : 'Please enter the extension URL',
+      directoryRequired: isZh ? '请选择扩展目录' : 'Please choose the extension directory',
+      installSuccess: isZh ? '扩展添加成功' : 'Extension added successfully',
+      installFailed: isZh ? '扩展添加失败' : 'Failed to add extension',
+      distributionGlobal: isZh ? '全局使用' : 'Global',
+      distributionManual: isZh ? '手动分配' : 'Manual',
+      globalHint: isZh ? '默认加载到所有浏览器窗口' : 'Loads in all browser windows',
+      manualHint: isZh ? '仅加载到已分配的浏览器窗口' : 'Loads only in assigned windows',
+      configure: isZh ? '配置' : 'Configure',
+      autoUpdate: isZh ? '自动更新' : 'Auto Update',
+      enabled: isZh ? '已开启' : 'Enabled',
+      disabled: isZh ? '已关闭' : 'Disabled',
+      version: isZh ? '版本' : 'Version',
+      closeGlobal: isZh ? '关闭全局使用' : 'Disable Global',
+      openGlobal: isZh ? '开启全局使用' : 'Enable Global',
+      closeAutoUpdate: isZh ? '关闭自动更新' : 'Disable Auto Update',
+      openAutoUpdate: isZh ? '开启自动更新' : 'Enable Auto Update',
+      remove: isZh ? '删除' : 'Delete',
+      deleteTitle: isZh ? '删除扩展' : 'Delete Extension',
+      deleteContent: isZh
+        ? '删除后将移除扩展文件以及所有窗口分配关系，是否继续？'
+        : 'Deleting will remove the extension files and all window assignments. Continue?',
+      deleteSuccess: isZh ? '扩展已删除' : 'Extension deleted',
+      deleteFailed: isZh ? '扩展删除失败' : 'Failed to delete extension',
+      updateSuccess: isZh ? '设置已更新' : 'Settings updated',
+      updateFailed: isZh ? '设置更新失败' : 'Failed to update settings',
+      assignTitle: isZh ? '分配环境' : 'Assign Windows',
+      assignSubtitle: isZh ? '请选择需要添加该扩展的浏览器窗口' : 'Choose windows for this extension',
+      allGroups: isZh ? '全部分组' : 'All Groups',
+      searchWindow: isZh ? '搜索浏览器窗口' : 'Search windows',
+      searchSelectedWindow: isZh ? '搜索已选窗口' : 'Search selected windows',
+      selectAllCurrent: isZh ? '全选当前筛选结果' : 'Select filtered',
+      selectedWindows: isZh ? '已选环境' : 'Selected',
+      clearSelected: isZh ? '清空已选' : 'Clear',
+      assignSuccess: isZh ? '分配已保存' : 'Assignments saved',
+      assignFailed: isZh ? '分配保存失败' : 'Failed to save assignments',
+      empty: isZh ? '暂无扩展' : 'No extensions',
+      noMatchedWindows: isZh ? '没有匹配的浏览器窗口' : 'No matching windows',
+      noSelectedWindows: isZh ? '当前没有已分配窗口' : 'No selected windows',
+      unnamedWindow: isZh ? '未命名窗口' : 'Untitled Window',
+    }),
+    [isZh],
+  );
+
   const [messageApi, contextHolder] = message.useMessage({
     duration: 2,
     top: 120,
     getContainer: () => document.body,
   });
-  const [uploadVisible, setUploadVisible] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [applyModalVisible, setApplyModalVisible] = useState(false);
-  const [selectedExtension, setSelectedExtension] = useState<DB.Extension>();
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [extensions, setExtensions] = useState<DB.Extension[]>([]);
   const [windows, setWindows] = useState<DB.Window[]>([]);
-  const [selectedWindows, setSelectedWindows] = useState<number[]>([]);
-  const [form] = Form.useForm();
-  const currentIds = windows.map(w => w.id!);
-  const currentSelectedCount = selectedWindows.filter(id => currentIds.includes(id)).length;
-  const indeterminate = currentSelectedCount > 0 && currentSelectedCount < windows.length;
-  const checkAll = windows.length > 0 && currentSelectedCount === windows.length;
-  const [searchValue, setSearchValue] = useState('');
-  const [groupOptions, setGroupOptions] = useState<DB.Group[]>([{id: -1, name: 'All'}]);
-  const [windowDataCopy, setWindowDataCopy] = useState<DB.Window[]>([]);
+  const [groupOptions, setGroupOptions] = useState<DB.Group[]>([]);
+  const [tableScrollY, setTableScrollY] = useState(window.innerHeight - PAGE_OFFSET);
+  const [pageSize, setPageSize] = useState(10);
+  const [uploadVisible, setUploadVisible] = useState(false);
+  const [assignVisible, setAssignVisible] = useState(false);
+  const [selectedExtension, setSelectedExtension] = useState<DB.Extension>();
+  const [selectedWindowIds, setSelectedWindowIds] = useState<number[]>([]);
+  const [groupFilter, setGroupFilter] = useState(-1);
+  const [windowSearch, setWindowSearch] = useState('');
+  const [selectedSearch, setSelectedSearch] = useState('');
+  const [installForm] = Form.useForm<InstallFormValues>();
 
-  const moreActionItems: MenuProps['items'] = [
-    {
-      key: 'update',
-      label: t('extension_update'),
-      icon: <SyncOutlined />,
-    },
-    {
-      type: 'divider',
-    },
-    {
-      key: 'delete',
-      danger: true,
-      label: t('extension_delete'),
-      icon: <DeleteOutlined />,
-    },
-  ];
-
-  const onChange = (list: number[]) => {
-    const currentIds = windows.map(w => w.id!);
-    // 保留不在当前视图的选中项
-    setSelectedWindows(prev => [...prev.filter(id => !currentIds.includes(id)), ...list]);
-  };
-
-  const onCheckAllChange: CheckboxProps['onChange'] = e => {
-    const currentIds = windows.map(w => w.id!);
-    if (e.target.checked) {
-      // 当全选时，保留不在当前视图的选中项，并添加当前视图的所有项
-      setSelectedWindows(prev => [...prev.filter(id => !currentIds.includes(id)), ...currentIds]);
-    } else {
-      // 当取消全选时，只移除当前视图的选中项
-      setSelectedWindows(prev => prev.filter(id => !currentIds.includes(id)));
-    }
-  };
-
-  const handleExtensionAction = async (key: string, extension: DB.Extension) => {
-    switch (key) {
-      case 'update':
-        setUploadVisible(true);
-        setSelectedExtension(extension);
-        form.setFieldsValue({
-          id: extension.id,
-          path: extension.path,
-          version: extension.version,
-          name: extension.name,
-          description: extension.description,
-        });
-
-        break;
-      case 'delete':
-        Modal.confirm({
-          title: t('extension_delete_confirm_title'),
-          icon: <ExclamationCircleFilled />,
-          content: t('extension_delete_confirm_content'),
-          okText: t('footer_ok'),
-          cancelText: t('footer_cancel'),
-          onOk: async () => {
-            try {
-              const result = await ExtensionBridge.deleteExtension(extension.id!);
-              if (result instanceof Object && !result?.success) {
-                messageApi.error(result.message);
-              } else {
-                await fetchExtensions();
-                messageApi.success(t('extension_delete_success'));
-              }
-            } catch (error) {
-              messageApi.error(t('extension_delete_failed'));
-            }
-          },
-        });
-        break;
-    }
-  };
+  const installSourceType = Form.useWatch('source_type', installForm) ?? 'chrome_web_store';
 
   const fetchExtensions = async () => {
     setLoading(true);
     try {
       const data = await ExtensionBridge.getAll();
-      setExtensions(data);
-    } catch (error) {
-      messageApi.error('获取扩展列表失败');
-    }
-    setLoading(false);
-  };
-
-  const fetchExtensionWindows = async (extensionId: number) => {
-    const data = await ExtensionBridge.getExtensionWindows(extensionId);
-    setSelectedWindows(data.map((w: DB.WindowExtension) => w.window_id));
-  };
-
-  const handleApplyToWindow = async () => {
-    if (!selectedExtension || !selectedWindows) return;
-
-    try {
-      await ExtensionBridge.syncWindowExtensions(selectedExtension.id!, selectedWindows);
-      messageApi.success('应用成功');
-    } catch (error) {
-      messageApi.error('应用失败');
-    }
-    setApplyModalVisible(false);
-  };
-
-  const handleUploadExtension = async (extension: DB.Extension) => {
-    if (!extension.name || !extension.path) {
-      if (!extension.name) {
-        messageApi.error('请填写扩展名称');
-      }
-      if (!extension.path) {
-        messageApi.error('请上传扩展安装包');
-      }
-      return;
-    }
-    if (selectedExtension) {
-      try {
-        await ExtensionBridge.updateExtension(selectedExtension.id!, extension);
-        messageApi.success('更新成功');
-        handleModalClose();
-        fetchExtensions();
-      } catch (error) {
-        messageApi.error('更新失败');
-      }
-    } else {
-      try {
-        await ExtensionBridge.createExtension(extension);
-        messageApi.success('上传成功');
-        handleModalClose();
-        fetchExtensions();
-      } catch (error) {
-        messageApi.error('上传失败');
-      }
+      setExtensions((data ?? []).map((item: DB.Extension) => normalizeExtension(item)));
+    } catch {
+      messageApi.error(labels.installFailed);
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchWindows = async () => {
     const data = await WindowBridge.getAll();
-    setWindows(data);
-    setWindowDataCopy(data);
+    const sortedWindows = [...(data ?? [])].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+    setWindows(sortedWindows);
   };
 
-  const fetchGroupData = async () => {
-    const data = await GroupBridge?.getAll();
-    data.splice(0, 0, {id: -1, name: 'All'});
-    setGroupOptions(data);
-  };
-
-  const handleGroupChange = (value: number) => {
-    if (value > -1) {
-      const filteredWindows = [...windowDataCopy].filter(f => f.group_id === value);
-      setWindows(filteredWindows);
-      // 保持已选中但不在当前视图的窗口ID
-      setSelectedWindows(prev => {
-        const filteredIds = filteredWindows.map(w => w.id!);
-        return [
-          ...prev.filter(
-            id =>
-              !windowDataCopy.find(w => w.id === id)?.group_id ||
-              windowDataCopy.find(w => w.id === id)?.group_id !== value,
-          ),
-          ...prev.filter(id => filteredIds.includes(id)),
-        ];
-      });
-    } else {
-      setWindows(windowDataCopy);
-    }
-  };
-
-  const onSearch: SearchProps['onSearch'] = (value: string) => {
-    if (value) {
-      const keyword = value.toLowerCase();
-      const filteredWindows = [...windowDataCopy].filter(
-        f =>
-          containsKeyword(f.group_name, keyword) ||
-          containsKeyword(f.name, keyword) ||
-          containsKeyword(f.id, keyword),
-      );
-      setWindows(filteredWindows);
-      // 保持已选中但不在当前视图的窗口ID
-      setSelectedWindows(prev => {
-        const filteredIds = filteredWindows.map(w => w.id!);
-        return [
-          ...prev.filter(id => !filteredIds.includes(id)),
-          ...prev.filter(id => filteredIds.includes(id)),
-        ];
-      });
-    } else {
-      setWindows(windowDataCopy);
-    }
-  };
-
-  const debounceSearch = debounce(value => {
-    onSearch(value);
-  }, 500);
-
-  const handleSearchValueChange = (value: string) => {
-    setSearchValue(value.trim());
-    debounceSearch(value.trim());
+  const fetchGroups = async () => {
+    const data = await GroupBridge.getAll();
+    setGroupOptions([{id: -1, name: labels.allGroups}, ...(data ?? [])]);
   };
 
   useEffect(() => {
-    fetchWindows();
-    fetchExtensions();
-    fetchGroupData();
+    void fetchExtensions();
+    void fetchWindows();
+    void fetchGroups();
+  }, [labels.allGroups]);
+
+  useEffect(() => {
+    const handleResize = _.debounce(() => {
+      setTableScrollY(window.innerHeight - PAGE_OFFSET);
+    }, 200);
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
-  const UploadForm = () => {
-    const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const filteredWindows = useMemo(() => {
+    return windows.filter(windowItem => {
+      const matchesGroup = groupFilter < 0 || windowItem.group_id === groupFilter;
+      return matchesGroup && matchWindowKeyword(windowItem, windowSearch);
+    });
+  }, [windows, groupFilter, windowSearch]);
 
-    const uploadProps: UploadProps = {
-      name: 'extension',
-      showUploadList: false,
-      fileList,
-      onChange: ({fileList: newFileList}) => {
-        setFileList(newFileList);
-      },
-      accept: '.zip',
-      customRequest: async ({file, onSuccess, onError}) => {
-        try {
-          setUploading(true);
-          const result = await ExtensionBridge.uploadPackage(
-            (file as File).path,
-            selectedExtension?.id,
-          );
-          if (result.success) {
-            form.setFieldsValue({
-              id: result.extensionId,
-              path: result.path,
-              version: result.version,
-            });
-            onSuccess?.(file);
-          } else {
-            onError?.(new Error(result.error));
-            messageApi.error('上传失败: ' + result.error);
-          }
-        } catch (error) {
-          messageApi.error('上传失败');
-        }
-        setUploading(false);
-      },
-    };
+  const selectedWindowIdSet = useMemo(() => new Set(selectedWindowIds), [selectedWindowIds]);
 
-    // const iconUploadProps: UploadProps = {
-    //     name: 'icon',
-    //     showUploadList: false,
-    //     accept: '.jpg,.jpeg,.png',
-    //     beforeUpload: (file) => {
-    //         const isImage = /\.(jpg|jpeg|png)$/.test(file.name);
-    //         if (!isImage) {
-    //             message.error(t('extension_icon_format_error'));
-    //             return false;
-    //         }
-    //         if (file.size > 1024 * 1024) {
-    //             message.error(t('extension_icon_size_error'));
-    //             return false;
-    //         }
+  const selectedWindows = useMemo(() => {
+    return windows.filter(windowItem => windowItem.id && selectedWindowIdSet.has(windowItem.id));
+  }, [windows, selectedWindowIdSet]);
 
-    //         const reader = new FileReader();
-    //         reader.onload = () => {
-    //             setIconUrl(reader.result as string);
-    //         };
-    //         reader.readAsDataURL(file as Blob);
-    //         return true;
-    //     }
-    // };
+  const filteredSelectedWindows = useMemo(() => {
+    return selectedWindows.filter(windowItem => matchWindowKeyword(windowItem, selectedSearch));
+  }, [selectedWindows, selectedSearch]);
 
-    return (
-      <Form
-        form={form}
-        layout="vertical"
-        size="large"
-        onFinish={handleUploadExtension}
-        initialValues={{
-          id: '',
-          path: '',
-          name: '',
-          version: '',
-          description: '',
-        }}
-        requiredMark="optional"
-      >
-        <Form.Item
-          name="id"
-          hidden
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          name="path"
-          hidden
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          name="version"
-          hidden
-        >
-          <Input />
-        </Form.Item>
+  const allFilteredSelected =
+    filteredWindows.length > 0 && filteredWindows.every(windowItem => selectedWindowIdSet.has(windowItem.id!));
+  const indeterminate =
+    filteredWindows.some(windowItem => selectedWindowIdSet.has(windowItem.id!)) && !allFilteredSelected;
 
-        {/* <Form.Item
-                    label={t('extension_icon')}
-                    tooltip={t('extension_icon_tooltip')}
-                >
-                    <Upload {...iconUploadProps}>
-                        <div className="w-[120px] h-[120px] border-2 border-dashed border-gray-200 rounded flex items-center justify-center cursor-pointer hover:border-blue-400">
-                            {iconUrl ? (
-                                <img src={iconUrl} className="w-full h-full object-cover" />
-                            ) : (
-                                <div className="text-center">
-                                    <CloudUploadOutlined className="text-2xl" />
-                                    <div>{t('extension_icon_upload_placeholder')}</div>
-                                </div>
-                            )}
-                        </div>
-                    </Upload>
-                </Form.Item> */}
-
-        <Form.Item
-          label={t('extension_name')}
-          name="name"
-          required
-          rules={[{required: true, message: t('extension_name_required')}]}
-        >
-          <Input
-            maxLength={20}
-            showCount
-            placeholder={t('extension_name_placeholder')}
-          />
-        </Form.Item>
-
-        <Form.Item
-          label={t('extension_description')}
-          name="description"
-          tooltip={t('extension_description_tooltip')}
-        >
-          <Input.TextArea
-            maxLength={200}
-            showCount
-            placeholder={t('extension_description_placeholder')}
-            rows={4}
-          />
-        </Form.Item>
-
-        {form.getFieldValue('id') && !selectedExtension ? (
-          <div>
-            <div className="mb-4">{t('extension_install_package')}</div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2">
-                <span>
-                  <CheckCircleOutlined className="text-green-500" />
-                </span>
-                {fileList.map(file => (
-                  <span
-                    key={file.uid}
-                    className="text-sm text-gray-500"
-                  >
-                    {file.name}
-                  </span>
-                ))}
-                <span>{t('extension_upload_success')}</span>
-              </div>
-
-              <span
-                className="cursor-pointer ml-2"
-                onClick={() => {
-                  form.setFieldsValue({id: '', path: ''});
-                  setFileList([]);
-                }}
-              >
-                <CloseCircleOutlined className="text-red-500" />
-              </span>
-            </div>
-          </div>
-        ) : (
-          <Form.Item
-            label={t('extension_install_package')}
-            required
-            tooltip={t('extension_install_package_tooltip')}
-          >
-            <Upload.Dragger {...uploadProps}>
-              <CloudUploadOutlined className="text-2xl" />
-              <div className="mt-2">{t('extension_upload2')}</div>
-              <div className="text-gray-400 text-sm">{t('extension_zip_format_tip')}</div>
-            </Upload.Dragger>
-            {uploading && (
-              <div className="text-gray-400 text-sm mt-2">{t('extension_uploading')}</div>
-            )}
-            {selectedExtension && (
-              <div className="text-gray-400 text-sm mt-2">
-                {t('extension_current_version')}: {selectedExtension.version}
-              </div>
-            )}
-          </Form.Item>
-        )}
-
-        <Form.Item className="mb-0">
-          <Space className="w-full justify-end">
-            <Button
-              type="text"
-              className="w-20"
-              size="middle"
-              onClick={() => setUploadVisible(false)}
-            >
-              {t('footer_cancel')}
-            </Button>
-            <Button
-              type="primary"
-              className="w-20"
-              size="middle"
-              onClick={() => form.submit()}
-            >
-              {t('footer_ok')}
-            </Button>
-          </Space>
-        </Form.Item>
-      </Form>
-    );
+  const openInstallModal = () => {
+    installForm.resetFields();
+    installForm.setFieldsValue({
+      source_type: 'chrome_web_store',
+      source_url: '',
+      directory_path: '',
+    });
+    setUploadVisible(true);
   };
 
-  const handleModalClose = () => {
-    form.resetFields();
-    setUploadVisible(false);
-    setSelectedExtension(undefined);
+  const handleChooseDirectory = async () => {
+    const directoryPath = await CommonBridge.choosePath('openDirectory');
+    if (directoryPath) {
+      installForm.setFieldValue('directory_path', directoryPath);
+    }
+  };
+
+  const handleInstall = async () => {
+    try {
+      const values = await installForm.validateFields();
+      setSaving(true);
+      const result =
+        values.source_type === 'custom'
+          ? await ExtensionBridge.installFromDirectory(values.directory_path!)
+          : await ExtensionBridge.installFromWebStore(values.source_url!);
+
+      if (!result?.success) {
+        messageApi.error(result?.error || labels.installFailed);
+        return;
+      }
+
+      messageApi.success(labels.installSuccess);
+      setUploadVisible(false);
+      await fetchExtensions();
+    } catch (error) {
+      if (error instanceof Error && error.message) {
+        messageApi.error(error.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openAssignModal = async (extension: DB.Extension) => {
+    try {
+      const result = await ExtensionBridge.getExtensionWindows(extension.id!);
+      setSelectedExtension(extension);
+      setSelectedWindowIds(
+        (result ?? [])
+          .map((item: DB.WindowExtension) => item.window_id)
+          .filter(Boolean) as number[],
+      );
+      setGroupFilter(-1);
+      setWindowSearch('');
+      setSelectedSearch('');
+      setAssignVisible(true);
+    } catch {
+      messageApi.error(labels.assignFailed);
+    }
+  };
+
+  const handleSaveAssignments = async () => {
+    if (!selectedExtension?.id) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const result = await ExtensionBridge.syncWindowExtensions(
+        selectedExtension.id,
+        selectedWindowIds,
+      );
+      if (!result?.success) {
+        messageApi.error(result?.message || labels.assignFailed);
+        return;
+      }
+
+      messageApi.success(labels.assignSuccess);
+      setAssignVisible(false);
+    } catch {
+      messageApi.error(labels.assignFailed);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleWindowSelection = (windowId: number) => {
+    setSelectedWindowIds(currentIds => {
+      if (currentIds.includes(windowId)) {
+        return currentIds.filter(id => id !== windowId);
+      }
+
+      return [...currentIds, windowId];
+    });
+  };
+
+  const toggleFilteredWindows = (checked: boolean) => {
+    const filteredIds = filteredWindows.map(windowItem => windowItem.id!).filter(Boolean);
+    setSelectedWindowIds(currentIds => {
+      if (checked) {
+        return Array.from(new Set([...currentIds, ...filteredIds]));
+      }
+
+      return currentIds.filter(id => !filteredIds.includes(id));
+    });
+  };
+
+  const handleUpdateExtension = async (extensionId: number, payload: Partial<DB.Extension>) => {
+    try {
+      setSaving(true);
+      await ExtensionBridge.updateExtension(extensionId, payload);
+      messageApi.success(labels.updateSuccess);
+      await fetchExtensions();
+    } catch {
+      messageApi.error(labels.updateFailed);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteExtension = async (extension: DB.Extension) => {
+    Modal.confirm({
+      title: labels.deleteTitle,
+      content: labels.deleteContent,
+      okText: t('footer_ok'),
+      cancelText: t('footer_cancel'),
+      okButtonProps: {danger: true},
+      onOk: async () => {
+        try {
+          const result = await ExtensionBridge.deleteExtension(extension.id!);
+          if (!result?.success) {
+            messageApi.error(result?.message || labels.deleteFailed);
+            return;
+          }
+
+          messageApi.success(labels.deleteSuccess);
+          await fetchExtensions();
+        } catch {
+          messageApi.error(labels.deleteFailed);
+        }
+      },
+    });
+  };
+
+  const buildMoreActionItems = (extension: DB.Extension): MenuProps['items'] => {
+    const isGlobal = extension.distribution_mode !== 'manual';
+    const autoUpdateEnabled =
+      typeof extension.auto_update === 'boolean'
+        ? extension.auto_update
+        : extension.auto_update !== 0;
+
+    return [
+      {
+        key: 'toggle-global',
+        icon: <GlobalOutlined />,
+        label: isGlobal ? labels.closeGlobal : labels.openGlobal,
+      },
+      {
+        key: 'toggle-auto-update',
+        icon: <SyncOutlined />,
+        label: autoUpdateEnabled ? labels.closeAutoUpdate : labels.openAutoUpdate,
+      },
+      {
+        type: 'divider',
+      },
+      {
+        key: 'delete',
+        danger: true,
+        icon: <DeleteOutlined />,
+        label: labels.remove,
+      },
+    ];
+  };
+
+  const handleMoreAction = async (key: string, extension: DB.Extension) => {
+    switch (key) {
+      case 'toggle-global':
+        await handleUpdateExtension(extension.id!, {
+          distribution_mode: extension.distribution_mode === 'manual' ? 'global' : 'manual',
+        });
+        break;
+      case 'toggle-auto-update':
+        await handleUpdateExtension(extension.id!, {
+          auto_update:
+            typeof extension.auto_update === 'boolean'
+              ? !extension.auto_update
+              : extension.auto_update === 0,
+        });
+        break;
+      case 'delete':
+        await handleDeleteExtension(extension);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const columns: ColumnsType<DB.Extension> = [
+    {
+      title: labels.extensionColumn,
+      dataIndex: 'name',
+      key: 'name',
+      render: (_, extension) => (
+        <Space
+          size={12}
+          align="start"
+        >
+          <Avatar
+            src={extension.icon}
+            shape="square"
+            size={46}
+            icon={<AppstoreAddOutlined />}
+            className="shrink-0"
+          />
+          <div className="min-w-0">
+            <Text
+              strong
+              className="block"
+            >
+              {extension.name}
+            </Text>
+            <Paragraph
+              className="mb-0 mt-1"
+              type="secondary"
+              ellipsis={{rows: 2, tooltip: extension.description || extension.source_url || extension.path}}
+            >
+              {extension.description || extension.source_url || extension.path}
+            </Paragraph>
+          </div>
+        </Space>
+      ),
+    },
+    {
+      title: labels.sourceColumn,
+      key: 'source',
+      width: 220,
+      render: (_, extension) => {
+        const autoUpdateEnabled =
+          typeof extension.auto_update === 'boolean'
+            ? extension.auto_update
+            : extension.auto_update !== 0;
+
+        return (
+          <Space
+            direction="vertical"
+            size={4}
+          >
+            <Tag color={extension.source_type === 'chrome_web_store' ? 'blue' : 'gold'}>
+              {extension.source_type === 'chrome_web_store'
+                ? labels.chromeWebStore
+                : labels.customExtension}
+            </Tag>
+            <Text type="secondary">
+              {labels.autoUpdate}: {autoUpdateEnabled ? labels.enabled : labels.disabled}
+            </Text>
+            <Text type="secondary">
+              {labels.version}: {extension.version || '-'}
+            </Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: labels.distributionColumn,
+      key: 'distribution',
+      width: 220,
+      render: (_, extension) => {
+        const isGlobal = extension.distribution_mode !== 'manual';
+        return (
+          <Space
+            direction="vertical"
+            size={4}
+          >
+            <Text strong>{isGlobal ? labels.distributionGlobal : labels.distributionManual}</Text>
+            <Text type="secondary">{isGlobal ? labels.globalHint : labels.manualHint}</Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: labels.actionColumn,
+      key: 'action',
+      width: 160,
+      align: 'center',
+      render: (_, extension) => {
+        const isGlobal = extension.distribution_mode !== 'manual';
+
+        return (
+          <Space size={8}>
+            {!isGlobal && (
+              <Button
+                size="small"
+                type="default"
+                onClick={() => openAssignModal(extension)}
+                icon={<SettingOutlined />}
+              >
+                {labels.configure}
+              </Button>
+            )}
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: buildMoreActionItems(extension),
+                onClick: ({key}) => handleMoreAction(key, extension),
+              }}
+            >
+              <Button
+                type="text"
+                icon={<MoreOutlined />}
+              />
+            </Dropdown>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  const renderWindowItem = (windowItem: DB.Window, selected: boolean) => {
+    return (
+      <button
+        type="button"
+        className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
+          selected ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+        }`}
+        onClick={() => toggleWindowSelection(windowItem.id!)}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <Text
+              strong
+              className="block"
+            >
+              {windowItem.name || labels.unnamedWindow}
+            </Text>
+            <Text type="secondary">
+              #{windowItem.id}
+              {windowItem.group_name ? ` · ${windowItem.group_name}` : ''}
+            </Text>
+          </div>
+          {selected && <CheckOutlined className="text-blue-500" />}
+        </div>
+      </button>
+    );
   };
 
   return (
     <>
       {contextHolder}
       <div className="content-toolbar">
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setSelectedExtension(undefined);
-            setUploadVisible(true);
-          }}
-        >
-          {t('extension_upload')}
-        </Button>
+        <Space size={12}>
+          <Button
+            type="primary"
+            icon={<AppstoreAddOutlined />}
+            onClick={openInstallModal}
+          >
+            {labels.upload}
+          </Button>
+          <Button
+            icon={<SyncOutlined />}
+            onClick={() => void fetchExtensions()}
+          >
+            {labels.refresh}
+          </Button>
+        </Space>
       </div>
 
-      <Row
-        gutter={[16, 16]}
-        className="mt-4 overflow-y-auto max-h-[calc(100vh-200px)]"
+      <Card
+        className="content-card mt-4"
+        bordered={false}
       >
-        {loading ? (
-          <Spin />
-        ) : (
-          extensions.map(ext => (
-            <Col
-              xs={24}
-              sm={12}
-              md={8}
-              lg={6}
-              xl={6}
-              xxl={4}
-              key={ext.id}
-            >
-              <Card
-                hoverable
-                title={ext.name}
-                cover={
-                  ext.icon && (
-                    <img
-                      alt={ext.name}
-                      src={ext.icon}
-                    />
-                  )
-                }
-                extra={
-                  <Dropdown
-                    menu={{
-                      items: moreActionItems,
-                      onClick: ({key}) => handleExtensionAction(key, ext),
-                    }}
-                    trigger={['hover']}
-                    placement="bottomRight"
-                  >
-                    <MoreOutlined className="cursor-pointer text-lg" />
-                  </Dropdown>
-                }
-                actions={[
-                  <Button
-                    type="link"
-                    onClick={() => {
-                      setSelectedExtension(ext);
-                      fetchExtensionWindows(ext.id!);
-                      setApplyModalVisible(true);
-                    }}
-                  >
-                    {t('extension_apply_to_window')}
-                  </Button>,
-                ]}
-              >
-                <Meta
-                  description={
-                    <Space direction="vertical">
-                      <Text type="secondary">ID: {ext.id}</Text>
-                      <Text type="secondary">
-                        {t('extension_version')}: {ext.version}
-                      </Text>
-                      <Text type="secondary">
-                        {t('extension_update_time')}: {ext.updated_at}
-                      </Text>
-                    </Space>
-                  }
-                />
-              </Card>
-            </Col>
-          ))
-        )}
-      </Row>
+        <Table
+          className="content-table"
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={extensions}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={labels.empty}
+              />
+            ),
+          }}
+          scroll={{x: 960, y: tableScrollY}}
+          pagination={{
+            rootClassName: 'pagination-wrapper',
+            pageSize,
+            pageSizeOptions: [10, 20, 50],
+            showSizeChanger: true,
+            onChange: (_, size) => {
+              setPageSize(size);
+            },
+          }}
+        />
+      </Card>
 
       <Modal
-        title={
-          <div className="text-xl font-bold">
-            {selectedExtension ? t('extension_update2') : t('extension_upload2')}
-          </div>
-        }
+        title={labels.upload}
         open={uploadVisible}
-        onCancel={handleModalClose}
-        footer={null}
-        width={640}
+        onCancel={() => setUploadVisible(false)}
+        onOk={() => void handleInstall()}
+        okText={t('footer_ok')}
+        cancelText={t('footer_cancel')}
+        confirmLoading={saving}
+        width={620}
+        destroyOnClose
       >
-        <UploadForm />
+        <Form
+          form={installForm}
+          layout="vertical"
+          initialValues={{source_type: 'chrome_web_store'}}
+        >
+          <Form.Item
+            label={isZh ? '扩展来源' : 'Source'}
+            name="source_type"
+          >
+            <Radio.Group>
+              <Radio value="chrome_web_store">{labels.chromeWebStore}</Radio>
+              <Radio value="custom">{labels.customExtension}</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          {installSourceType === 'custom' ? (
+            <Form.Item
+              label={labels.extensionDirectory}
+              name="directory_path"
+              rules={[{required: true, message: labels.directoryRequired}]}
+            >
+              <Input
+                readOnly
+                placeholder={labels.extensionDirectoryPlaceholder}
+                addonAfter={
+                  <Button
+                    type="link"
+                    icon={<FolderOpenOutlined />}
+                    onClick={() => void handleChooseDirectory()}
+                  >
+                    {labels.chooseDirectory}
+                  </Button>
+                }
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              label={labels.extensionUrl}
+              name="source_url"
+              rules={[{required: true, message: labels.sourceRequired}]}
+            >
+              <Input placeholder={labels.extensionUrlPlaceholder} />
+            </Form.Item>
+          )}
+        </Form>
       </Modal>
 
       <Modal
-        title={<div className="text-xl font-bold">{t('extension_apply_to_window')}</div>}
-        open={applyModalVisible}
-        onOk={handleApplyToWindow}
-        onCancel={() => setApplyModalVisible(false)}
-      >
-        <div className="p-4">
-          <div className="flex items-center mb-4 justify-between">
-            <Checkbox
-              indeterminate={indeterminate}
-              onChange={onCheckAllChange}
-              checked={checkAll}
-              className="text-base font-medium"
-            >
-              {t('extension_select_all')}
-            </Checkbox>
-
-            <Space size={16}>
-              <Select
-                defaultValue={-1}
-                defaultActiveFirstOption={true}
-                style={{width: 120}}
-                fieldNames={{value: 'id', label: 'name'}}
-                onChange={handleGroupChange}
-                options={groupOptions}
-              />
-              <Input
-                value={searchValue}
-                className="w-[200px]"
-                placeholder={t('search_window')}
-                onChange={e => handleSearchValueChange(e.target.value)}
-                prefix={<SearchOutlined />}
-              />
-            </Space>
+        title={
+          <div>
+            <div className="text-xl font-semibold">{labels.assignTitle}</div>
+            <div className="mt-1 text-sm font-normal text-slate-500">{labels.assignSubtitle}</div>
           </div>
-          <Divider className="my-2" />
+        }
+        open={assignVisible}
+        onCancel={() => setAssignVisible(false)}
+        onOk={() => void handleSaveAssignments()}
+        okText={t('footer_ok')}
+        cancelText={t('footer_cancel')}
+        confirmLoading={saving}
+        width={920}
+        destroyOnClose
+      >
+        <div className="mb-5">
+          <Text type="secondary">
+            {isZh ? '扩展名称' : 'Extension'}: {selectedExtension?.name}
+          </Text>
+        </div>
 
-          <div className="max-h-[400px] overflow-y-auto pr-2">
-            <CheckboxGroup
-              value={selectedWindows}
-              onChange={onChange}
-            >
-              <Row gutter={[16, 8]}>
-                <Col span={12}>
-                  {windows
-                    .filter((_, index) => index % 2 === 0)
-                    .map(w => (
-                      <div
-                        key={w.id}
-                        className="p-2 hover:bg-gray-50 rounded-md transition-colors"
-                      >
-                        <Checkbox value={w.id}>
-                          <span className="inline-flex items-center gap-2">
-                            <span className="text-gray-400">#{w.id}</span>
-                            <span className="font-medium">{w.name}</span>
-                            {w.group_name && (
-                              <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded whitespace-nowrap">
-                                {w.group_name}
-                              </span>
-                            )}
-                          </span>
-                        </Checkbox>
-                      </div>
-                    ))}
-                </Col>
-                <Col span={12}>
-                  {windows
-                    .filter((_, index) => index % 2 !== 0)
-                    .map(w => (
-                      <div
-                        key={w.id}
-                        className="p-2 hover:bg-gray-50 rounded-md transition-colors"
-                      >
-                        <Checkbox value={w.id}>
-                          <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-gray-400">#{w.id}</span>
-                            <span className="font-medium">{w.name}</span>
-                            {w.group_name && (
-                              <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded whitespace-nowrap">
-                                {w.group_name}
-                              </span>
-                            )}
-                          </span>
-                        </Checkbox>
-                      </div>
-                    ))}
-                </Col>
-              </Row>
-            </CheckboxGroup>
+        <div className="grid grid-cols-2 gap-5">
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <Checkbox
+                indeterminate={indeterminate}
+                checked={allFilteredSelected}
+                onChange={event => toggleFilteredWindows(event.target.checked)}
+              >
+                {labels.selectAllCurrent}
+              </Checkbox>
+              <Select
+                value={groupFilter}
+                className="w-[140px]"
+                options={groupOptions}
+                fieldNames={{label: 'name', value: 'id'}}
+                onChange={value => setGroupFilter(value)}
+              />
+            </div>
+
+            <Input
+              value={windowSearch}
+              placeholder={labels.searchWindow}
+              prefix={<SearchOutlined />}
+              onChange={event => setWindowSearch(event.target.value.trim())}
+            />
+
+            <div className="mt-4 h-[360px] overflow-y-auto pr-1">
+              <List
+                split={false}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={labels.noMatchedWindows}
+                    />
+                  ),
+                }}
+                dataSource={filteredWindows}
+                renderItem={windowItem => (
+                  <List.Item className="!px-0 !py-1">
+                    {renderWindowItem(windowItem, selectedWindowIdSet.has(windowItem.id!))}
+                  </List.Item>
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <Text strong>
+                {labels.selectedWindows} ({selectedWindowIds.length})
+              </Text>
+              <Button
+                type="link"
+                onClick={() => setSelectedWindowIds([])}
+                disabled={!selectedWindowIds.length}
+              >
+                {labels.clearSelected}
+              </Button>
+            </div>
+
+            <div className="mb-3 flex min-h-[40px] flex-wrap gap-2">
+              {selectedWindows.map(windowItem => (
+                <Tag
+                  key={windowItem.id}
+                  closable
+                  onClose={event => {
+                    event.preventDefault();
+                    toggleWindowSelection(windowItem.id!);
+                  }}
+                >
+                  {windowItem.name || labels.unnamedWindow} #{windowItem.id}
+                </Tag>
+              ))}
+            </div>
+
+            <Input
+              value={selectedSearch}
+              placeholder={labels.searchSelectedWindow}
+              prefix={<SearchOutlined />}
+              onChange={event => setSelectedSearch(event.target.value.trim())}
+            />
+
+            <div className="mt-4 h-[320px] overflow-y-auto pr-1">
+              <List
+                split={false}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={labels.noSelectedWindows}
+                    />
+                  ),
+                }}
+                dataSource={filteredSelectedWindows}
+                renderItem={windowItem => (
+                  <List.Item className="!px-0 !py-1">
+                    {renderWindowItem(windowItem, true)}
+                  </List.Item>
+                )}
+              />
+            </div>
           </div>
         </div>
       </Modal>

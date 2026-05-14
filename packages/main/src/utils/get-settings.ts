@@ -15,6 +15,8 @@ export const getSettings = (): SettingOptions => {
     useLocalChrome: true,
     localChromePath: '',
     chromiumBinPath: '',
+    useCloakBrowser: false,
+    cloakBrowserPath: '',
     automationConnect: false,
   };
 
@@ -39,7 +41,13 @@ export const getSettings = (): SettingOptions => {
   if (!settings.localChromePath) {
     settings.localChromePath = getChromePath() as string;
   }
-  settings.useLocalChrome = true;
+  if (process.env.CLOAK_BROWSER_PATH) {
+    settings.cloakBrowserPath = process.env.CLOAK_BROWSER_PATH;
+  }
+  if (process.env.CLOAK_BROWSER_ENABLED === '1' || settings.cloakBrowserPath) {
+    settings.useCloakBrowser = true;
+    settings.useLocalChrome = false;
+  }
   if (!settings.chromiumBinPath || settings.chromiumBinPath === 'Chrome-bin\\chrome.exe') {
     if (import.meta.env.DEV) {
       settings.chromiumBinPath = 'Chrome-bin\\chrome.exe';

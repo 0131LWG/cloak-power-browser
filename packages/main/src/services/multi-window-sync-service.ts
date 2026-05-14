@@ -94,20 +94,27 @@ try {
   logger.error('Failed to load window addon:', error);
 }
 
-// Load @tkomde/iohook
 let uIOhook: SafeAny;
-try {
-  const iohook = require('@tkomde/iohook');
-  uIOhook = iohook;
-  // Enable rawcode mode to get native OS keycodes directly
-  if (typeof iohook.useRawcode === 'function') {
-    iohook.useRawcode(true);
-    logger.info('@tkomde/iohook loaded successfully with rawcode enabled');
-  } else {
-    logger.info('@tkomde/iohook loaded successfully (rawcode mode not available)');
+
+function loadUiohook() {
+  if (uIOhook) {
+    return uIOhook;
   }
-} catch (error) {
-  logger.error('Failed to load @tkomde/iohook:', error);
+
+  try {
+    const iohook = require('@tkomde/iohook');
+    uIOhook = iohook;
+    if (typeof iohook.useRawcode === 'function') {
+      iohook.useRawcode(true);
+      logger.info('@tkomde/iohook loaded successfully with rawcode enabled');
+    } else {
+      logger.info('@tkomde/iohook loaded successfully (rawcode mode not available)');
+    }
+    return uIOhook;
+  } catch (error) {
+    logger.error('Failed to load @tkomde/iohook:', error);
+    return null;
+  }
 }
 
 class MultiWindowSyncService {
@@ -167,7 +174,8 @@ class MultiWindowSyncService {
         return {success: false, error: 'Sync already active'};
       }
 
-      if (!uIOhook) {
+      const hook = loadUiohook();
+      if (!hook) {
         return {success: false, error: '@tkomde/iohook not loaded'};
       }
 
@@ -191,7 +199,7 @@ class MultiWindowSyncService {
       this.setupEventListeners();
 
       // Start capturing events
-      uIOhook.start();
+      hook.start();
       this.isCapturing = true;
 
       // Start CDP sync if enabled

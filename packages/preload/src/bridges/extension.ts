@@ -4,6 +4,10 @@ import type {DB} from '../../../shared/types/db';
 export const ExtensionBridge = {
   import: (filePath: string) => ipcRenderer.invoke('extension-import', filePath),
   getAll: () => ipcRenderer.invoke('extension-get-all'),
+  installFromWebStore: (sourceUrl: string) =>
+    ipcRenderer.invoke('extension-install-from-web-store', sourceUrl),
+  installFromDirectory: (directoryPath: string) =>
+    ipcRenderer.invoke('extension-install-from-directory', directoryPath),
   applyToWindows: (extensionId: number, windowIds: number[]) =>
     ipcRenderer.invoke('extension-apply-to-windows', extensionId, windowIds),
   deleteExtensionWindows: (extensionId: number, windowIds: number[]) =>

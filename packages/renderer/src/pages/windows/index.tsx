@@ -30,6 +30,7 @@ import {
   GlobalOutlined,
   DeleteOutlined,
   SyncOutlined,
+  ClearOutlined,
   // ExportOutlined,
   ExclamationCircleFilled,
   ExportOutlined,
@@ -44,6 +45,31 @@ import {useTranslation} from 'react-i18next';
 
 const {Text} = Typography;
 
+const getWindowNameNumber = (name?: string) => {
+  const match = name?.match(/\d+/);
+
+  return match ? Number(match[0]) : null;
+};
+
+const compareWindowNameByNumber = (left: DB.Window, right: DB.Window) => {
+  const leftNumber = getWindowNameNumber(left.name);
+  const rightNumber = getWindowNameNumber(right.name);
+
+  if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+
+  if (leftNumber !== null && rightNumber === null) {
+    return -1;
+  }
+
+  if (leftNumber === null && rightNumber !== null) {
+    return 1;
+  }
+
+  return (left.name ?? '').localeCompare(right.name ?? '');
+};
+
 const Windows = () => {
   const OFFSET = 266;
   const [group, setGroup] = useState(-1);
@@ -56,6 +82,7 @@ const Windows = () => {
   const [rawWindowData, setRawWindowData] = useState<DB.Window[]>([]);
   const [groupOptions, setGroupOptions] = useState<DB.Group[]>([{id: -1, name: 'All'}]);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [clearCacheModalVisible, setClearCacheModalVisible] = useState(false);
   const [tagMap, setTagMap] = useState(new Map<number, DB.Tag>());
   const [messageApi, contextHolder] = message.useMessage(MESSAGE_CONFIG);
   const [proxySettingVisible, setProxySettingVisible] = useState(false);
@@ -69,6 +96,11 @@ const Windows = () => {
     //   label: 'Switching Group',
     //   icon: <SendOutlined />,
     // },
+    {
+      key: 'clear-cache',
+      label: t('window_clear_cache'),
+      icon: <ClearOutlined />,
+    },
     {
       key: 'export',
       label: t('window_export'),
@@ -94,6 +126,11 @@ const Windows = () => {
       key: 'proxy',
       label: t('window_proxy_setting'),
       icon: <GlobalOutlined />,
+    },
+    {
+      key: 'clear-cache',
+      label: t('window_clear_cache'),
+      icon: <ClearOutlined />,
     },
     // {
     //   key: 'set-cookie',
@@ -138,6 +175,8 @@ const Windows = () => {
         width: 100,
         dataIndex: 'name',
         key: 'name',
+        sorter: compareWindowNameByNumber,
+        sortDirections: ['ascend', 'descend'],
       },
       {
         title: t('window_column_remark'),
@@ -334,6 +373,10 @@ const Windows = () => {
         setSelectedRow(undefined);
         deleteWindows();
         break;
+      case 'clear-cache':
+        setSelectedRow(undefined);
+        clearWindowsCache();
+        break;
       case 'export':
         exportWindows();
         break;
@@ -468,6 +511,17 @@ const Windows = () => {
     setDeleteModalVisible(true);
   };
 
+  const clearWindowsCache = (window?: DB.Window) => {
+    const ids = window ? [window.id!] : selectedRow ? [selectedRow.id!] : selectedRowKeys;
+
+    if (ids.length === 0) {
+      messageApi.warning(t('window_select_first'));
+      return;
+    }
+
+    setClearCacheModalVisible(true);
+  };
+
   const onDeleteModalOk = async () => {
     const ids = selectedRow ? [selectedRow.id!] : selectedRowKeys;
     try {
@@ -484,6 +538,42 @@ const Windows = () => {
 
   const onDeleteModalCancel = () => {
     setDeleteModalVisible(false);
+  };
+
+  const onClearCacheModalOk = async () => {
+    const ids = selectedRow ? [selectedRow.id!] : selectedRowKeys;
+
+    try {
+      setLoading(true);
+      const result = await WindowBridge?.clearCache(ids);
+      const skippedCount = result?.data?.skipped?.length ?? 0;
+      const failedCount = result?.data?.failed?.length ?? 0;
+
+      if (skippedCount > 0 || failedCount > 0) {
+        messageApi.warning(
+          t('window_clear_cache_partial', {
+            cleared: result?.data?.cleared?.length ?? 0,
+            skipped: skippedCount + failedCount,
+          }),
+        );
+      } else if (result?.success === false) {
+        messageApi.error(result.message || t('window_clear_cache_failed'));
+      } else {
+        messageApi.success(t('window_clear_cache_success'));
+      }
+
+      setClearCacheModalVisible(false);
+      setSelectedRowKeys([]);
+      setSelectedRow(undefined);
+    } catch (error) {
+      messageApi.error((error as Error)?.message || t('window_clear_cache_failed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onClearCacheModalCancel = () => {
+    setClearCacheModalVisible(false);
   };
 
   const setCookie = async (window: DB.Window) => {
@@ -507,6 +597,10 @@ const Windows = () => {
         setSelectedRow(recorder);
         setSelectedProxy(recorder.proxy_id ?? undefined);
         setProxySettingVisible(true);
+        break;
+      case 'clear-cache':
+        setSelectedRow(recorder);
+        clearWindowsCache(recorder);
         break;
       case 'set-cookie':
         setSelectedRow(recorder);
@@ -667,6 +761,28 @@ const Windows = () => {
             The current operation will keep the local cache, if you want to delete the local cache,
             please go to the cache directory to delete manually.
           </div>
+        </div>
+      </Modal>
+      <Modal
+        title={
+          <>
+            <ExclamationCircleFilled
+              style={{color: '#faad14', fontSize: '22px', marginRight: '12px'}}
+            ></ExclamationCircleFilled>
+            <span>{t('window_clear_cache_title')}</span>
+          </>
+        }
+        open={clearCacheModalVisible}
+        centered
+        onOk={onClearCacheModalOk}
+        onCancel={onClearCacheModalCancel}
+        closable={false}
+        confirmLoading={loading}
+        okText={t('footer_ok')}
+        cancelText={t('footer_cancel')}
+      >
+        <div className="pl-[36px]">
+          <div>{t('window_clear_cache_confirm')}</div>
         </div>
       </Modal>
       <Modal

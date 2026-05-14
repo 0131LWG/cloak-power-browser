@@ -50,6 +50,11 @@ type ProxyFormProps = {
   remark?: string;
 };
 
+const PROXY_TYPE_OPTIONS = [
+  {label: 'SOCKS5', value: 'socks5'},
+  {label: 'HTTP', value: 'http'},
+];
+
 const Proxy = () => {
   const {t} = useTranslation();
   const OFFSET = 266;
@@ -74,6 +79,15 @@ const Proxy = () => {
       key: 'export',
       label: t('proxy_export'),
       icon: <ExportOutlined />,
+    },
+    {
+      key: 'batch-update-type',
+      label: t('proxy_batch_update_type'),
+      icon: <GlobalOutlined />,
+      children: PROXY_TYPE_OPTIONS.map(option => ({
+        key: `batch-update-type:${option.value}`,
+        label: option.label,
+      })),
     },
     {
       type: 'divider',
@@ -284,6 +298,12 @@ const Proxy = () => {
       case 'export':
         exportProxy();
         break;
+      case 'batch-update-type:http':
+        batchUpdateProxyType('http');
+        break;
+      case 'batch-update-type:socks5':
+        batchUpdateProxyType('socks5');
+        break;
 
       default:
         break;
@@ -408,6 +428,33 @@ const Proxy = () => {
 
   const deleteProxy = () => {
     setDeleteModalVisible(true);
+  };
+
+  const batchUpdateProxyType = async (proxyType: string) => {
+    if (selectedRowKeys.length === 0) {
+      messageApi.warning('Please select proxies first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const results = await Promise.all(
+        selectedRowKeys.map(id => ProxyBridge?.update(id, {proxy_type: proxyType})),
+      );
+
+      if (results.some(result => !result)) {
+        messageApi.error('Failed to update some proxies');
+        return;
+      }
+
+      messageApi.success('Proxy type updated successfully');
+      await fetchProxyData();
+      setSelectedRowKeys([]);
+    } catch (error) {
+      messageApi.error('Failed to update proxy type');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const newProxy = async () => {
@@ -625,10 +672,7 @@ const Proxy = () => {
               rules={[{required: true, message: 'Please Select Proxy Type!'}]}
             >
               <Select
-                options={[
-                  {label: 'Socks5', value: 'socks5'},
-                  {label: 'Http', value: 'http'},
-                ]}
+                options={PROXY_TYPE_OPTIONS}
               />
             </Form.Item>
             <Form.Item<ProxyFormProps>

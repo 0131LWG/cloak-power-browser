@@ -51,19 +51,25 @@ const WindowDetailFooter = ({
 
   const saveWindow = async (formValue: DB.Window) => {
     setSaving(true);
-    savePreparation(formValue);
-    let result: OperationResult;
-    if (formValue.id) {
-      result = await WindowBridge?.update(formValue.id, {
-        ...formValue,
-        proxy_id: formValue.proxy_id || null,
-      });
-      showMessage(result);
-    } else {
-      if (currentTab === 'windowForm') {
-        result = await WindowBridge?.create(formValue, fingerprints);
+    try {
+      savePreparation(formValue);
+      let result: OperationResult;
+      if (formValue.id) {
+        result = await WindowBridge?.update(formValue.id, {
+          ...formValue,
+          proxy_id: formValue.proxy_id || null,
+        });
         showMessage(result);
+      } else {
+        if (currentTab === 'windowForm') {
+          result = await WindowBridge?.create(formValue, fingerprints);
+          showMessage(result);
+        }
       }
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error)).then(() => {
+        setSaving(false);
+      });
     }
   };
 

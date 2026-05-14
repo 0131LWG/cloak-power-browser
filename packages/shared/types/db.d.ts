@@ -1,6 +1,17 @@
 // types/models.d.ts
 
 export namespace DB {
+  export interface WindowFingerprint {
+    ua?: string;
+    fingerprintSeed?: string;
+    locale?: string;
+    timezone?: string;
+    platform?: 'macos' | 'windows' | 'linux' | string;
+    screenWidth?: number;
+    screenHeight?: number;
+    webrtcPolicy?: 'auto' | 'disabled' | 'default' | string;
+  }
+
   export interface Window {
     id?: number;
     profile_id?: string;
@@ -13,7 +24,10 @@ export namespace DB {
     created_at?: string;
     updated_at?: string;
     ua?: string;
-    fingerprint?: string;
+    fingerprint?: string | WindowFingerprint;
+    browser_engine?: 'chrome' | 'chromium' | 'cloakbrowser' | string;
+    browser_runtime_platform?: string;
+    browser_version?: string;
     cookie?: string;
     /** 0: removed; 1: closed; 2: running; 3: Preparing  */
     status?: number;
@@ -65,6 +79,11 @@ export namespace DB {
     windows?: number[] | string;
     icon?: string;
     description?: string;
+    source_type?: 'chrome_web_store' | 'custom' | string;
+    source_url?: string;
+    chrome_extension_id?: string;
+    distribution_mode?: 'global' | 'manual' | string;
+    auto_update?: boolean | number;
     created_at?: string;
     updated_at?: string;
   }

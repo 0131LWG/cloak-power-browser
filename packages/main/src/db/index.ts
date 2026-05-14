@@ -1,4 +1,5 @@
 import knex from 'knex';
+import type {Knex} from 'knex';
 import {app} from 'electron';
 import {mkdirSync, existsSync} from 'fs';
 import {DB_CONFIG} from '../constants';
@@ -22,6 +23,30 @@ const initWindowStatus = async () => {
   }
 };
 
+const ensureWindowRuntimeColumns = async () => {
+  const hasWindowTable = await db.schema.hasTable('window');
+  if (!hasWindowTable) {
+    return;
+  }
+
+  const columns = [
+    ['browser_engine', (table: Knex.AlterTableBuilder) => table.string('browser_engine').nullable()],
+    [
+      'browser_runtime_platform',
+      (table: Knex.AlterTableBuilder) => table.string('browser_runtime_platform').nullable(),
+    ],
+    ['browser_version', (table: Knex.AlterTableBuilder) => table.string('browser_version').nullable()],
+  ] as const;
+
+  for (const [columnName, addColumn] of columns) {
+    const hasColumn = await db.schema.hasColumn('window', columnName);
+    if (!hasColumn) {
+      await db.schema.table('window', addColumn);
+      console.log(`Added missing window column: ${columnName}`);
+    }
+  }
+};
+
 const initializeDatabase = async () => {
   const userDataPath = app.getPath('userData');
 
@@ -34,10 +59,21 @@ const initializeDatabase = async () => {
     // 初始化数据库连接
     await db.raw('SELECT 1');
 
+    // Defensive schema repair before migrations for users stuck in a partially upgraded database.
+    await ensureWindowRuntimeColumns();
+
     // 运行迁移
-    await db.migrate.latest({
-      directory: app.isPackaged ? join(process.resourcesPath, 'app/migrations') : './migrations',
-    });
+    try {
+      await db.migrate.latest({
+        directory: app.isPackaged ? join(process.resourcesPath, 'app/migrations') : './migrations',
+        disableMigrationsListValidation: true,
+      });
+    } catch (migrationError) {
+      console.error('Database migration failed:', migrationError);
+    }
+
+    // Defensive schema repair after migrations too. This keeps old packaged builds recoverable.
+    await ensureWindowRuntimeColumns();
 
     // 初始化窗口状态
     await initWindowStatus();

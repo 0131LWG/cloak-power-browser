@@ -61,3 +61,8 @@ packages/main/src/native-addon/build
 
 
 nul
+
+# Prepared CloakBrowser runtimes are large platform-specific binaries.
+vendor/cloakbrowser/*
+!vendor/cloakbrowser/.gitkeep
+runtime-downloads/

@@ -24,6 +24,12 @@ import {existsSync, mkdirSync} from 'fs';
 import api from '../../../shared/api/api';
 import {ExtensionDB} from '../db/extension';
 import { getPort } from '../server';
+import {
+  buildCloakBrowserLaunchPlan,
+  getCloakBrowserPath,
+  shouldUseCloakBrowser,
+} from '../cloakbrowser/launcher';
+import {ensureCloakBrowserRuntime} from '../cloakbrowser/runtime-manager';
 
 const mutex = new Mutex();
 
@@ -181,13 +187,14 @@ export async function openFingerprintWindow(id: number, headless = false) {
     const proxyData = await ProxyDB.getById(windowData.proxy_id);
     const proxyType = proxyData?.proxy_type?.toLowerCase();
     const settings = getSettings();
+    const useCloakBrowser = shouldUseCloakBrowser(settings, windowData);
 
     const cachePath = settings.profileCachePath;
 
     const win = BrowserWindow.getAllWindows()[0];
     const windowDataDir = join(
       cachePath,
-      settings.useLocalChrome ? 'chrome' : 'chromium',
+      useCloakBrowser ? 'cloakbrowser' : settings.useLocalChrome ? 'chrome' : 'chromium',
       windowData.profile_id,
     );
 
@@ -212,15 +219,33 @@ export async function openFingerprintWindow(id: number, headless = false) {
       }
     }
 
-    const driverPath = getDriverPath();
-    let ipInfo = {timeZone: '', ip: '', ll: [], country: ''};
-    if (windowData.proxy_id && proxyData.ip) {
-      ipInfo = await getProxyInfo(proxyData);
-      if (!ipInfo?.ip) {
-        logger.error('ipInfo is empty');
-      }
+    if (useCloakBrowser) {
+      await WindowDB.update(id, {
+        ...windowData,
+        status: 3,
+      });
     }
-
+    let cloakRuntime = null;
+    try {
+      cloakRuntime = useCloakBrowser
+        ? await ensureCloakBrowserRuntime(windowData.browser_version)
+        : null;
+    } catch (error) {
+      await WindowDB.update(id, {
+        ...windowData,
+        status: 1,
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      bridgeMessageToUI({
+        type: 'error',
+        text: `CloakBrowser runtime failed: ${message}`,
+      });
+      logger.error('CloakBrowser runtime failed', error);
+      return null;
+    }
+    const driverPath = useCloakBrowser
+      ? cloakRuntime?.executablePath || getCloakBrowserPath(settings)
+      : getDriverPath();
     // const fingerprint =
     //   windowData.fingerprint && windowData.fingerprint !== '{}'
     //     ? JSON.parse(windowData.fingerprint)
@@ -245,9 +270,45 @@ export async function openFingerprintWindow(id: number, headless = false) {
         finalProxy = proxyInstance.proxyUrl;
         proxyServer = proxyInstance.proxyServer;
       }
+      let ipInfo = {
+        timeZone: '',
+        ip: proxyData?.ip || '',
+        ll: [],
+        country: proxyData?.ip_country || '',
+      };
+      if (windowData.proxy_id && proxyData?.proxy) {
+        const resolvedIpInfo = await getProxyInfo(proxyData, finalProxy);
+        if (resolvedIpInfo?.ip || resolvedIpInfo?.country || resolvedIpInfo?.timeZone) {
+          ipInfo = {
+            ...ipInfo,
+            ...resolvedIpInfo,
+            country: resolvedIpInfo.country || proxyData.ip_country || '',
+            timeZone: resolvedIpInfo.timeZone || '',
+          };
+        }
+        if (!ipInfo?.ip) {
+          logger.error('ipInfo is empty');
+        }
+      }
 
       const isMac = process.platform === 'darwin';
-      const launchParamter = settings.useLocalChrome
+      const startUrl = `http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`;
+      const launchParamter = useCloakBrowser
+        ? buildCloakBrowserLaunchPlan(settings, {
+            chromePort,
+            finalProxy,
+            headless,
+            ipCountry: ipInfo?.country,
+            ipTimeZone: ipInfo?.timeZone,
+            isMac,
+            profileId: windowData.profile_id,
+            profileRoot: cachePath,
+            runtimeExecutablePath: cloakRuntime?.executablePath,
+            startUrl,
+            extensions: extensionData.map(e => e.path),
+            windowData,
+          }).args
+        : settings.useLocalChrome
         ? [
             `--remote-debugging-port=${chromePort}`,
             `--user-data-dir=${windowDataDir}`,
@@ -272,24 +333,24 @@ export async function openFingerprintWindow(id: number, headless = false) {
             ...(isMac ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
           ];
 
-      if (finalProxy) {
+      if (finalProxy && !useCloakBrowser) {
         launchParamter.push(`--proxy-server=${finalProxy}`);
       }
-      if (ipInfo?.timeZone && !settings.useLocalChrome) {
+      if (ipInfo?.timeZone && !settings.useLocalChrome && !useCloakBrowser) {
         launchParamter.push(`--timezone=${ipInfo.timeZone}`);
         launchParamter.push(`--tz=${ipInfo.timeZone}`);
       }
-      if (extensionData.length > 0) {
+      if (extensionData.length > 0 && !useCloakBrowser) {
         launchParamter.push(`--load-extension=${extensionData.map(e => e.path).join(',')}`);
       }
-      if (headless) {
+      if (headless && !useCloakBrowser) {
         launchParamter.push('--headless=new'); // 使用新版 headless 模式
         if (!isMac) {
           launchParamter.push('--disable-gpu'); // 在 Mac 上不需要这个参数
         }
-      } else {
+      } else if (!useCloakBrowser) {
         launchParamter.push('--new-window');
-        launchParamter.push(`http://localhost:${getClientPort()}/#/start?windowId=${id}&serverPort=${getPort()}`);
+        launchParamter.push(startUrl);
       }
 
       // 添加调试参数（如果需要）

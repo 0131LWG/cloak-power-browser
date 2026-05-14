@@ -29,6 +29,10 @@ export const WindowBridge = {
     const result = await ipcRenderer.invoke('window-batchDelete', ids);
     return result;
   },
+  async clearCache(ids: number[]) {
+    const result = await ipcRenderer.invoke('window-clear-cache', ids);
+    return result;
+  },
   async getAll() {
     const result = await ipcRenderer.invoke('window-getAll');
     return result;
@@ -43,6 +47,11 @@ export const WindowBridge = {
   },
   async getById(id: number) {
     const result = await ipcRenderer.invoke('window-getById', id);
+    return result;
+  },
+
+  async getCloakBrowserRuntimes() {
+    const result = await ipcRenderer.invoke('window-cloakbrowser-runtimes');
     return result;
   },
 

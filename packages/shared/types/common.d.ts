@@ -9,6 +9,8 @@ export interface SettingOptions {
   useLocalChrome: boolean;
   localChromePath: string;
   chromiumBinPath: string;
+  useCloakBrowser?: boolean;
+  cloakBrowserPath?: string;
   automationConnect: boolean;
 }
 
