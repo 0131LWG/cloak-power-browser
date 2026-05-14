@@ -19,6 +19,7 @@ import fs from 'fs';
 import os from 'os';
 
 const logger = createLogger(PROXY_LOGGER_LABEL);
+const IP_CHECK_URLS = ['https://ipinfo.io/json', 'https://api.ipify.org?format=json'];
 
 export async function createShortcutWithIcon(exePath: string, args: string[], iconPath: string, shortcutPath: string) {
   try {
@@ -119,10 +120,7 @@ const getRealIP = async (proxy: DB.Proxy) => {
   };
 
   try {
-    return await Promise.race([
-      makeRequest('https://ipinfo.io/json', requestProxy),
-      makeRequest('https://api.ipify.org?format=json', requestProxy),
-    ]);
+    return await firstSuccessful(IP_CHECK_URLS.map(url => makeRequest(url, requestProxy)));
   } catch (error) {
     bridgeMessageToUI({
       type: 'error',
@@ -163,20 +161,20 @@ export const getProxyInfo = async (proxy: DB.Proxy, proxyUrl?: string) => {
 
 const getRealIPFromUrl = async (proxyUrl: string) => {
   try {
-    const agent = proxyUrl.startsWith('socks')
-      ? new SocksProxyAgent(proxyUrl)
-      : proxyUrl.startsWith('https://')
-      ? new HttpsProxyAgent(proxyUrl)
-      : new HttpProxyAgent(proxyUrl);
-    const {data} = await axios.get('https://ipinfo.io/json', {
-      proxy: false,
-      timeout: 5_000,
-      httpAgent: agent,
-      httpsAgent: agent,
-      validateStatus: status => status >= 200 && status < 300,
-      maxRedirects: 5,
-    });
-    return data.ip;
+    const {httpAgent, httpsAgent} = getProxyUrlAgents(proxyUrl);
+    return await firstSuccessful(
+      IP_CHECK_URLS.map(async url => {
+        const {data} = await axios.get(url, {
+          proxy: false,
+          timeout: 5_000,
+          httpAgent,
+          httpsAgent,
+          validateStatus: status => status >= 200 && status < 300,
+          maxRedirects: 5,
+        });
+        return data.ip;
+      }),
+    );
   } catch (error) {
     bridgeMessageToUI({
       type: 'error',
@@ -184,6 +182,31 @@ const getRealIPFromUrl = async (proxyUrl: string) => {
     });
     logger.error(`| Prepare | getRealIPFromUrl | error: ${(error as {message: string}).message}`);
     return '';
+  }
+};
+
+const getProxyUrlAgents = (proxyUrl: string) => {
+  const normalizedProxyUrl = proxyUrl.toLowerCase();
+  if (normalizedProxyUrl.startsWith('socks')) {
+    const agent = new SocksProxyAgent(proxyUrl);
+    return {
+      httpAgent: agent,
+      httpsAgent: agent,
+    };
+  }
+
+  return {
+    httpAgent: new HttpProxyAgent(proxyUrl),
+    httpsAgent: new HttpsProxyAgent(proxyUrl),
+  };
+};
+
+const firstSuccessful = async <T>(promises: Promise<T>[]) => {
+  try {
+    return await Promise.any(promises);
+  } catch (error) {
+    const aggregateError = error as AggregateError;
+    throw aggregateError.errors?.[0] || error;
   }
 };
 
