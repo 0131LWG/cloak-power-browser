@@ -194,6 +194,18 @@ class MultiWindowSyncService {
 
       // Get window bounds
       await this.updateWindowBounds();
+      if (!this.masterWindowBounds) {
+        return {
+          success: false,
+          error: `Cannot get bounds for master window PID ${masterPid}. Window may be closed or inaccessible.`,
+        };
+      }
+      if (this.slaveWindowBounds.size === 0) {
+        return {
+          success: false,
+          error: 'Cannot get bounds for slave windows. Windows may be closed or inaccessible.',
+        };
+      }
 
       // Set up event listeners
       this.setupEventListeners();
@@ -264,6 +276,9 @@ class MultiWindowSyncService {
   private async updateWindowBounds(): Promise<void> {
     if (!this.masterWindowPid) return;
 
+    this.masterWindowBounds = null;
+    this.slaveWindowBounds.clear();
+
     // Get master window bounds
     const masterBounds = this.windowManager.getWindowBounds(this.masterWindowPid);
     if (masterBounds.success) {
@@ -274,6 +289,8 @@ class MultiWindowSyncService {
         height: masterBounds.height,
         pid: this.masterWindowPid,
       };
+    } else {
+      logger.warn(`Failed to get master window bounds for PID ${this.masterWindowPid}`);
     }
 
     // Get slave window bounds
@@ -287,6 +304,8 @@ class MultiWindowSyncService {
           height: slaveBounds.height,
           pid: slavePid,
         });
+      } else {
+        logger.warn(`Failed to get slave window bounds for PID ${slavePid}`);
       }
     }
   }
@@ -1269,9 +1288,14 @@ export const initMultiWindowSyncService = () => {
   logger.info('Initializing multi-window sync service...');
 
   // Start sync
-  ipcMain.handle('multi-window-sync-start', async (_, args: {masterWindowId: number; slaveWindowIds: number[]}) => {
+  ipcMain.handle(
+    'multi-window-sync-start',
+    async (
+      _,
+      args: {masterWindowId: number; slaveWindowIds: number[]; options?: SyncOptions},
+    ) => {
     try {
-      const {masterWindowId, slaveWindowIds} = args;
+      const {masterWindowId, slaveWindowIds, options} = args;
 
       // Get window PIDs from database
       const masterWindow = await WindowDB.getById(masterWindowId);
@@ -1288,12 +1312,13 @@ export const initMultiWindowSyncService = () => {
         return {success: false, error: 'No valid slave windows found'};
       }
 
-      return await syncService.startSync(masterWindow.pid, slavePids);
+      return await syncService.startSync(masterWindow.pid, slavePids, options);
     } catch (error) {
       logger.error('Error starting sync:', error);
       return {success: false, error: error instanceof Error ? error.message : 'Unknown error'};
     }
-  });
+    },
+  );
 
   // Stop sync
   ipcMain.handle('multi-window-sync-stop', async () => {

@@ -69,13 +69,27 @@ export const initSyncService = () => {
         logger.error('WindowManager not initialized');
         throw new Error('WindowManager not initialized');
       }
+      const mainBounds = windowManager.getWindowBounds(mainPid);
+      if (!mainBounds?.success) {
+        throw new Error(`Main window not found or inaccessible (PID: ${mainPid})`);
+      }
+      if (!Array.isArray(childPids) || childPids.length === 0) {
+        throw new Error('No child windows provided for arrangement');
+      }
+      const validChildPids = childPids.filter((pid: number) => {
+        const bounds = windowManager.getWindowBounds(pid);
+        return Boolean(bounds?.success);
+      });
+      if (validChildPids.length === 0) {
+        throw new Error('No valid child windows found for arrangement');
+      }
       logger.info('arrangeWindows', windowManager.arrangeWindows.toString());
       try {
         // Pass monitorIndex if provided, otherwise let native addon use default (0)
         if (monitorIndex !== undefined) {
-          windowManager.arrangeWindows(mainPid, childPids, columns, size, spacing, monitorIndex);
+          windowManager.arrangeWindows(mainPid, validChildPids, columns, size, spacing, monitorIndex);
         } else {
-          windowManager.arrangeWindows(mainPid, childPids, columns, size, spacing);
+          windowManager.arrangeWindows(mainPid, validChildPids, columns, size, spacing);
         }
       } catch (e) {
         logger.error('Native function execution error:', e);

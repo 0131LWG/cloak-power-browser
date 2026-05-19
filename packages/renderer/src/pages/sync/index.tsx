@@ -343,7 +343,7 @@ const Sync = () => {
     message.success(t('sync_msg_master_set'));
   };
 
-  const handleArrangeWindows = () => {
+  const handleArrangeWindows = async () => {
     if (!windows.length) {
       message.warning(t('sync_msg_no_windows'));
       return;
@@ -363,9 +363,13 @@ const Sync = () => {
       return;
     }
 
-    SyncBridge.arrangeWindows(config as any);
-    saveSyncConfig();
-    message.success(t('sync_msg_arranged'));
+    const result = await SyncBridge.arrangeWindows(config as any);
+    saveSyncConfig(config as SyncConfig);
+    if (result?.success) {
+      message.success(t('sync_msg_arranged'));
+    } else {
+      message.error(t('sync_msg_start_failed', {error: result?.error || 'Unknown error'}));
+    }
   };
 
   const onArrangeValuesChange = (_: any, allFields: any) => {

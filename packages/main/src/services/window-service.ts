@@ -24,6 +24,19 @@ const isPathInside = (root: string, target: string) => {
   return Boolean(relativePath) && !relativePath.startsWith('..') && !isAbsolute(relativePath);
 };
 
+const isPidAlive = (pid: number | null | undefined): boolean => {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    // EPERM means process exists but current process has no permission
+    if (code === 'EPERM') return true;
+    return false;
+  }
+};
+
 const clearWindowCache = async (ids: number[]) => {
   const settings = getSettings();
   const cachePath = resolvePath(settings.profileCachePath);
@@ -136,7 +149,30 @@ export const initWindowService = () => {
   });
 
   ipcMain.handle('window-getOpened', async () => {
-    return await WindowDB.getOpenedWindows();
+    const windows = await WindowDB.getOpenedWindows();
+
+    const aliveWindows: typeof windows = [];
+    for (const win of windows) {
+      if (isPidAlive(win.pid)) {
+        aliveWindows.push(win);
+        continue;
+      }
+
+      // Auto-heal stale running state if PID is no longer alive
+      try {
+        await WindowDB.update(win.id!, {
+          ...win,
+          status: 1,
+          pid: null,
+          port: null,
+        });
+        logger.warn(`Detected stale window runtime state. Auto-reset window ${win.id} (pid=${win.pid})`);
+      } catch (error) {
+        logger.error(`Failed to auto-reset stale window ${win.id} (pid=${win.pid})`, error);
+      }
+    }
+
+    return aliveWindows;
   });
 
   ipcMain.handle('window-export', async () => {

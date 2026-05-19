@@ -1,5 +1,6 @@
 #include <napi.h>
 #include <iostream>
+#include <sstream>
 
 #ifdef __APPLE__
 #import <Foundation/Foundation.h>
@@ -268,43 +269,28 @@ private:
         }
     }
 
+    bool ReadAXString(AXUIElementRef window, CFStringRef key, char* out, size_t outSize) {
+        if (!out || outSize == 0) return false;
+        out[0] = '\0';
+        CFTypeRef valueRef = nullptr;
+        if (AXUIElementCopyAttributeValue(window, key, &valueRef) != kAXErrorSuccess || !valueRef) {
+            return false;
+        }
+        if (CFGetTypeID(valueRef) != CFStringGetTypeID()) {
+            CFRelease(valueRef);
+            return false;
+        }
+        bool ok = CFStringGetCString((CFStringRef)valueRef, out, outSize, kCFStringEncodingUTF8);
+        CFRelease(valueRef);
+        return ok;
+    }
+
     bool IsExtensionWindow(AXUIElementRef window) {
-        // Check window title
-        CFStringRef titleRef;
-        if (AXUIElementCopyAttributeValue(window, kAXTitleAttribute, (CFTypeRef*)&titleRef) == kAXErrorSuccess) {
-            char buffer[256];
-            CFStringGetCString(titleRef, buffer, sizeof(buffer), kCFStringEncodingUTF8);
-            CFRelease(titleRef);
-            
-            // Extension windows typically don't have "Google Chrome" in their titles
-            // and are usually smaller floating windows
-            if (strstr(buffer, "Google Chrome") == nullptr) {
-                return true;
-            }
+        char subroleBuffer[256] = {0};
+        if (ReadAXString(window, kAXSubroleAttribute, subroleBuffer, sizeof(subroleBuffer))) {
+            return strcmp(subroleBuffer, "AXStandardWindow") != 0;
         }
-
-        // Check window role
-        CFStringRef roleRef;
-        if (AXUIElementCopyAttributeValue(window, kAXRoleAttribute, (CFTypeRef*)&roleRef) == kAXErrorSuccess) {
-            char buffer[256];
-            CFStringGetCString(roleRef, buffer, sizeof(buffer), kCFStringEncodingUTF8);
-            CFRelease(roleRef);
-            
-            // Extension windows might have different roles
-            if (strcmp(buffer, "AXWindow") == 0) {
-                // Additional check for window level
-                CFStringRef subroleRef;
-                if (AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, (CFTypeRef*)&subroleRef) == kAXErrorSuccess) {
-                    char subroleBuffer[256];
-                    CFStringGetCString(subroleRef, subroleBuffer, sizeof(subroleBuffer), kCFStringEncodingUTF8);
-                    CFRelease(subroleRef);
-                    
-                    return strcmp(subroleBuffer, "AXStandardWindow") != 0;
-                }
-            }
-        }
-
-        return false;
+        return true;
     }
 
     void BringWindowToFront(AXUIElementRef window) {
@@ -325,29 +311,66 @@ private:
     }
 
     bool IsMainWindow(AXUIElementRef window) {
-        // Check window title
-        CFStringRef titleRef;
-        if (AXUIElementCopyAttributeValue(window, kAXTitleAttribute, (CFTypeRef*)&titleRef) == kAXErrorSuccess) {
-            char buffer[256];
-            CFStringGetCString(titleRef, buffer, sizeof(buffer), kCFStringEncodingUTF8);
-            CFRelease(titleRef);
-            
-            // Main Chrome window should contain "Google Chrome" in title
-            if (strstr(buffer, "Google Chrome") != nullptr) {
-                // Also check subrole to ensure it's a standard window
-                CFStringRef subroleRef;
-                if (AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, (CFTypeRef*)&subroleRef) == kAXErrorSuccess) {
-                    char subroleBuffer[256];
-                    CFStringGetCString(subroleRef, subroleBuffer, sizeof(subroleBuffer), kCFStringEncodingUTF8);
-                    CFRelease(subroleRef);
-                    
-                    // Main window should have "AXStandardWindow" subrole
-                    return strcmp(subroleBuffer, "AXStandardWindow") == 0;
-                }
-            }
+        // Main window detection should not depend on localized/product-specific title.
+        // Use AXSubrole to detect standard top-level browser window.
+        CFStringRef subroleRef;
+        if (AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, (CFTypeRef*)&subroleRef) == kAXErrorSuccess) {
+            char subroleBuffer[256];
+            CFStringGetCString(subroleRef, subroleBuffer, sizeof(subroleBuffer), kCFStringEncodingUTF8);
+            CFRelease(subroleRef);
+            return strcmp(subroleBuffer, "AXStandardWindow") == 0;
         }
-        
         return false;
+    }
+
+    void LogWindowsForPid(pid_t pid, const char* reason) {
+        std::ostringstream oss;
+        oss << "[WindowDebug] PID " << pid << " " << reason;
+        AXUIElementRef app = AXUIElementCreateApplication(pid);
+        if (!app) {
+            oss << " | app handle unavailable";
+            std::cerr << oss.str() << std::endl;
+            return;
+        }
+        CFArrayRef windowArray = nullptr;
+        if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef*)&windowArray) != kAXErrorSuccess || !windowArray) {
+            oss << " | AXWindows unavailable";
+            CFRelease(app);
+            std::cerr << oss.str() << std::endl;
+            return;
+        }
+        CFIndex count = CFArrayGetCount(windowArray);
+        oss << " | windows=" << count;
+        for (CFIndex i = 0; i < count; i++) {
+            AXUIElementRef window = (AXUIElementRef)CFArrayGetValueAtIndex(windowArray, i);
+            char title[256] = {0};
+            char role[128] = {0};
+            char subrole[128] = {0};
+            ReadAXString(window, kAXTitleAttribute, title, sizeof(title));
+            ReadAXString(window, kAXRoleAttribute, role, sizeof(role));
+            ReadAXString(window, kAXSubroleAttribute, subrole, sizeof(subrole));
+            CGSize size = {0, 0};
+            AXValueRef sizeRef = nullptr;
+            if (AXUIElementCopyAttributeValue(window, kAXSizeAttribute, (CFTypeRef*)&sizeRef) == kAXErrorSuccess && sizeRef) {
+                AXValueGetValue(sizeRef, (AXValueType)kAXValueCGSizeType, &size);
+                CFRelease(sizeRef);
+            }
+            bool minimized = false;
+            CFBooleanRef minimizedRef = nullptr;
+            if (AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute, (CFTypeRef*)&minimizedRef) == kAXErrorSuccess && minimizedRef) {
+                minimized = CFBooleanGetValue(minimizedRef);
+                CFRelease(minimizedRef);
+            }
+            oss << " | #" << i
+                << " title=" << (title[0] ? title : "<empty>")
+                << " role=" << (role[0] ? role : "<empty>")
+                << " subrole=" << (subrole[0] ? subrole : "<empty>")
+                << " size=" << (int)size.width << "x" << (int)size.height
+                << " minimized=" << (minimized ? "1" : "0");
+        }
+        CFRelease(windowArray);
+        CFRelease(app);
+        std::cerr << oss.str() << std::endl;
     }
 
     std::vector<WindowInfo> GetWindowsForPid(pid_t pid) {
@@ -361,6 +384,8 @@ private:
         CFArrayRef windowArray;
         if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef*)&windowArray) == kAXErrorSuccess) {
             CFIndex count = CFArrayGetCount(windowArray);
+            int bestMainIndex = -1;
+            int bestMainScore = -1;
             for (CFIndex i = 0; i < count; i++) {
                 AXUIElementRef window = (AXUIElementRef)CFArrayGetValueAtIndex(windowArray, i);
                 
@@ -378,20 +403,34 @@ private:
                     if (AXUIElementCopyAttributeValue(window, kAXSizeAttribute, (CFTypeRef*)&sizeRef) == kAXErrorSuccess) {
                         AXValueGetValue(sizeRef, (AXValueType)kAXValueCGSizeType, &size);
                         CFRelease(sizeRef);
+                        if (size.width <= 0 || size.height <= 0) {
+                            continue;
+                        }
 
-                        bool isExtension = IsExtensionWindow(window);
                         bool isMain = IsMainWindow(window);
+                        bool isExtension = IsExtensionWindow(window);
+                        WindowInfo info;
+                        info.window = (AXUIElementRef)CFRetain(window);
+                        info.pid = pid;
+                        info.isExtension = isExtension;
+                        info.width = static_cast<int>(size.width);
+                        info.height = static_cast<int>(size.height);
+                        windows.push_back(info);
 
-                        if (isMain || isExtension) {
-                            WindowInfo info;
-                            info.window = (AXUIElementRef)CFRetain(window);
-                            info.pid = pid;
-                            info.isExtension = isExtension;
-                            info.width = static_cast<int>(size.width);
-                            info.height = static_cast<int>(size.height);
-                            windows.push_back(info);
+                        int area = info.width * info.height;
+                        int score = area;
+                        if (isMain) score += 10000000;
+                        if (!isExtension) score += 1000000;
+                        if (score > bestMainScore) {
+                            bestMainScore = score;
+                            bestMainIndex = static_cast<int>(windows.size() - 1);
                         }
                     }
+                }
+            }
+            if (!windows.empty() && bestMainIndex >= 0) {
+                for (size_t i = 0; i < windows.size(); i++) {
+                    windows[i].isExtension = static_cast<int>(i) != bestMainIndex;
                 }
             }
             CFRelease(windowArray);
@@ -404,6 +443,7 @@ private:
         auto windows = GetWindowsForPid(pid);
         if (windows.empty()) {
             LOG_ERROR("No windows found for process");
+            LogWindowsForPid(pid, "ArrangeWindow: no candidate windows");
             return false;
         }
 
@@ -420,6 +460,7 @@ private:
 
         if (!mainWindow) {
             LOG_ERROR("Main window not found");
+            LogWindowsForPid(pid, "ArrangeWindow: main window not detected");
             return false;
         }
 
