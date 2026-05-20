@@ -146,6 +146,33 @@ struct WindowDebugInfo {
             LOG_ERROR("Failed to reset window z-order");
             return false;
         }
+
+        // Verify move actually took effect. Some Chromium windows can ignore a single SetWindowPos.
+        RECT finalRect = {0, 0, 0, 0};
+        if (GetWindowRect(hwnd, &finalRect)) {
+            int finalWidth = finalRect.right - finalRect.left;
+            int finalHeight = finalRect.bottom - finalRect.top;
+            bool posMismatch = (finalRect.left != x) || (finalRect.top != y);
+            bool sizeMismatch = !preserveSize && ((finalWidth != width) || (finalHeight != height));
+            if (posMismatch || sizeMismatch) {
+                // Fallback retry path.
+                if (!MoveWindow(hwnd, x, y, width, height, TRUE)) {
+                    LOG_ERROR("MoveWindow retry failed after SetWindowPos mismatch");
+                    return false;
+                }
+                RECT retryRect = {0, 0, 0, 0};
+                if (GetWindowRect(hwnd, &retryRect)) {
+                    int retryWidth = retryRect.right - retryRect.left;
+                    int retryHeight = retryRect.bottom - retryRect.top;
+                    bool retryPosMismatch = (retryRect.left != x) || (retryRect.top != y);
+                    bool retrySizeMismatch = !preserveSize && ((retryWidth != width) || (retryHeight != height));
+                    if (retryPosMismatch || retrySizeMismatch) {
+                        LOG_ERROR("Window position/size unchanged after MoveWindow retry");
+                        return false;
+                    }
+                }
+            }
+        }
         
         return true;
     }
