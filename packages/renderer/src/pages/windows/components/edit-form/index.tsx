@@ -142,6 +142,11 @@ const WindowEditForm = ({
   type FieldType = DB.Window;
   const selectedBrowserEngine = Form.useWatch('browser_engine', form);
 
+  const emitProgrammaticChange = (changed: Partial<DB.Window>) => {
+    const data = form.getFieldsValue(true) as DB.Window;
+    formChangeCallback(changed as DB.Window, data);
+  };
+
   useEffect(() => {
     if (!runtimePlatform) {
       return;
@@ -151,7 +156,15 @@ const WindowEditForm = ({
       form.setFieldValue('browser_engine', 'cloakbrowser');
       form.setFieldValue('browser_runtime_platform', runtimePlatform);
       const recommended = cloakBrowserRuntimes.find(runtime => runtime.recommended);
-      form.setFieldValue('browser_version', recommended?.tag || cloakBrowserRuntimes[0]?.tag);
+      const defaultVersion = recommended?.tag || cloakBrowserRuntimes[0]?.tag;
+      if (defaultVersion) {
+        form.setFieldValue('browser_version', defaultVersion);
+      }
+      emitProgrammaticChange({
+        browser_engine: 'cloakbrowser',
+        browser_runtime_platform: runtimePlatform,
+        ...(defaultVersion ? {browser_version: defaultVersion} : {}),
+      });
       return;
     }
 
@@ -159,13 +172,28 @@ const WindowEditForm = ({
       return;
     }
 
+    const patch: Partial<DB.Window> = {};
+
+    const currentPlatform = form.getFieldValue('browser_runtime_platform');
+    if (currentPlatform !== runtimePlatform) {
+      form.setFieldValue('browser_runtime_platform', runtimePlatform);
+      patch.browser_runtime_platform = runtimePlatform;
+    }
+
     const currentVersion = form.getFieldValue('browser_version');
-    form.setFieldValue('browser_runtime_platform', runtimePlatform);
     if (!currentVersion) {
       const recommended = cloakBrowserRuntimes.find(runtime => runtime.recommended);
-      form.setFieldValue('browser_version', recommended?.tag || cloakBrowserRuntimes[0]?.tag);
+      const defaultVersion = recommended?.tag || cloakBrowserRuntimes[0]?.tag;
+      if (defaultVersion) {
+        form.setFieldValue('browser_version', defaultVersion);
+        patch.browser_version = defaultVersion;
+      }
     }
-  }, [selectedBrowserEngine, runtimePlatform, cloakBrowserRuntimes, form]);
+
+    if (Object.keys(patch).length) {
+      emitProgrammaticChange(patch);
+    }
+  }, [selectedBrowserEngine, runtimePlatform, cloakBrowserRuntimes, form, formChangeCallback]);
 
   return (
     <Form

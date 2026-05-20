@@ -30,11 +30,11 @@ const WindowDetailTabs = ({
       forceRender: true,
       children: (
         <div className="flex w-full">
-          {WindowEditForm({
-            loading: false,
-            formValue: formValue,
-            formChangeCallback: formValueChangeCallback,
-          })}
+          <WindowEditForm
+            loading={false}
+            formValue={formValue}
+            formChangeCallback={formValueChangeCallback}
+          />
           {/* {FingerprintInfo({fingerprints})} */}
         </div>
       ),
@@ -42,7 +42,7 @@ const WindowDetailTabs = ({
     {
       key: 'import',
       label: t('window_detail_import'),
-      children: WindowImportForm(),
+      children: <WindowImportForm />,
     },
   ];
 
@@ -57,8 +57,7 @@ const WindowDetailTabs = ({
 };
 
 const WindowDetail = () => {
-  // const [formValue, setFormValue] = useState<DB.Window>({});
-  const [formValue, setFormValue] = useState<DB.Window>(new Object());
+  const [formValue, setFormValue] = useState<DB.Window>({});
   const [currentTab, setCurrentTab] = useState('windowForm');
   const [searchParams] = useSearchParams();
   const [fingerprints, setFingerprints] = useState<SafeAny>(new Object());
@@ -107,12 +106,10 @@ const WindowDetail = () => {
   }, []);
 
   const formValueChangeCallback = (changed: DB.Window, _: DB.Window) => {
-    const newFormValue = {
-      ...formValue,
+    setFormValue(prev => ({
+      ...prev,
       ...changed,
-    };
-    setFormValue(newFormValue);
-    // setFormValue(data);
+    }));
   };
 
   return (
