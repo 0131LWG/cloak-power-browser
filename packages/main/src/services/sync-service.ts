@@ -58,6 +58,40 @@ export const initSyncService = () => {
   }
   
   const windowManager = new (addon as SafeAny).WindowManager();
+  const getBoundsWithFallback = (pid: number) => {
+    const bounds = windowManager.getWindowBounds(pid);
+    if (bounds?.success) return bounds;
+
+    try {
+      const windows = (windowManager.getAllWindows(pid) || []) as Array<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }>;
+      if (!windows.length) return bounds;
+
+      const largest = windows.reduce((best, current) => {
+        const bestArea = (best.width || 0) * (best.height || 0);
+        const currentArea = (current.width || 0) * (current.height || 0);
+        return currentArea > bestArea ? current : best;
+      });
+
+      if (largest.width > 0 && largest.height > 0) {
+        return {
+          success: true,
+          x: largest.x,
+          y: largest.y,
+          width: largest.width,
+          height: largest.height,
+        };
+      }
+    } catch (error) {
+      logger.warn('[WindowDebug] getBoundsWithFallback failed', {pid, error});
+    }
+
+    return bounds;
+  };
   const logWindowsByPid = (pid: number, reason: string) => {
     try {
       const windows = windowManager.getAllWindows(pid) || [];
@@ -77,7 +111,7 @@ export const initSyncService = () => {
         logger.error('WindowManager not initialized');
         throw new Error('WindowManager not initialized');
       }
-      const mainBounds = windowManager.getWindowBounds(mainPid);
+      const mainBounds = getBoundsWithFallback(mainPid);
       if (!mainBounds?.success) {
         logWindowsByPid(mainPid, 'Main window bounds lookup failed');
         throw new Error(`Main window not found or inaccessible (PID: ${mainPid})`);
@@ -86,7 +120,7 @@ export const initSyncService = () => {
         throw new Error('No child windows provided for arrangement');
       }
       const validChildPids = childPids.filter((pid: number) => {
-        const bounds = windowManager.getWindowBounds(pid);
+        const bounds = getBoundsWithFallback(pid);
         if (!bounds?.success) {
           logWindowsByPid(pid, 'Child window bounds lookup failed');
         }

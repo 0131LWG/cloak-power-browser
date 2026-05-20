@@ -42,6 +42,10 @@ interface WindowBounds {
   pid: number;
 }
 
+type BoundsLookupResult =
+  | {success: true; x: number; y: number; width: number; height: number}
+  | {success: false};
+
 interface MouseEventData {
   x: number;
   y: number;
@@ -162,6 +166,49 @@ class MultiWindowSyncService {
     } catch (error) {
       logger.warn(`[WindowDebug] ${reason} (getAllWindows failed)`, {pid, error});
     }
+  }
+
+  private getBoundsWithFallback(pid: number): BoundsLookupResult {
+    const bounds = this.windowManager.getWindowBounds(pid) as Partial<BoundsLookupResult>;
+    if (
+      bounds?.success &&
+      typeof bounds.x === 'number' &&
+      typeof bounds.y === 'number' &&
+      typeof bounds.width === 'number' &&
+      typeof bounds.height === 'number'
+    ) {
+      return bounds as BoundsLookupResult;
+    }
+
+    try {
+      const windows = (this.windowManager.getAllWindows(pid) || []) as Array<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }>;
+      if (!windows.length) return {success: false};
+
+      const largest = windows.reduce((best, current) => {
+        const bestArea = (best.width || 0) * (best.height || 0);
+        const currentArea = (current.width || 0) * (current.height || 0);
+        return currentArea > bestArea ? current : best;
+      });
+
+      if (largest.width > 0 && largest.height > 0) {
+        return {
+          success: true,
+          x: largest.x,
+          y: largest.y,
+          width: largest.width,
+          height: largest.height,
+        };
+      }
+    } catch (error) {
+      logger.warn('[WindowDebug] getBoundsWithFallback failed', {pid, error});
+    }
+
+    return {success: false};
   }
 
   constructor() {
@@ -289,7 +336,7 @@ class MultiWindowSyncService {
     this.slaveWindowBounds.clear();
 
     // Get master window bounds
-    const masterBounds = this.windowManager.getWindowBounds(this.masterWindowPid);
+    const masterBounds = this.getBoundsWithFallback(this.masterWindowPid);
     if (masterBounds.success) {
       this.masterWindowBounds = {
         x: masterBounds.x,
@@ -305,7 +352,7 @@ class MultiWindowSyncService {
 
     // Get slave window bounds
     for (const slavePid of this.slaveWindowPids) {
-      const slaveBounds = this.windowManager.getWindowBounds(slavePid);
+      const slaveBounds = this.getBoundsWithFallback(slavePid);
       if (slaveBounds.success) {
         this.slaveWindowBounds.set(slavePid, {
           x: slaveBounds.x,
