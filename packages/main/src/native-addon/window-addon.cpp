@@ -801,6 +801,27 @@ struct WindowDebugInfo {
                 }
             }
 
+            // Fallback for cloak-style windows: if all windows were classified as extension,
+            // promote the largest one to child main window.
+            if (!childMain && !childWindows.empty()) {
+                WindowInfo* largest = &childWindows[0];
+                int largestArea = largest->width * largest->height;
+                for (auto& win : childWindows) {
+                    int area = win.width * win.height;
+                    if (area > largestArea) {
+                        largest = &win;
+                        largestArea = area;
+                    }
+                }
+                childMain = largest;
+                childExtensions.clear();
+                for (auto& win : childWindows) {
+                    if (&win != childMain) {
+                        childExtensions.push_back(&win);
+                    }
+                }
+            }
+
             if (childMain) {
                 int row = (i + 1) / columns;
                 int col = (i + 1) % columns;
