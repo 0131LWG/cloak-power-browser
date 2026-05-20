@@ -155,6 +155,15 @@ class MultiWindowSyncService {
   // Key repeat (holding key down) typically happens every 30-33ms, so we use 20ms threshold
   private keyEventCounter: number = 0; // Counter to track event frequency
 
+  private logWindowsByPid(pid: number, reason: string): void {
+    try {
+      const windows = this.windowManager?.getAllWindows?.(pid) || [];
+      logger.warn(`[WindowDebug] ${reason}`, {pid, windowCount: windows.length, windows});
+    } catch (error) {
+      logger.warn(`[WindowDebug] ${reason} (getAllWindows failed)`, {pid, error});
+    }
+  }
+
   constructor() {
     if (windowAddon) {
       this.windowManager = new windowAddon.WindowManager();
@@ -291,6 +300,7 @@ class MultiWindowSyncService {
       };
     } else {
       logger.warn(`Failed to get master window bounds for PID ${this.masterWindowPid}`);
+      this.logWindowsByPid(this.masterWindowPid, 'Master window bounds lookup failed');
     }
 
     // Get slave window bounds
@@ -306,6 +316,7 @@ class MultiWindowSyncService {
         });
       } else {
         logger.warn(`Failed to get slave window bounds for PID ${slavePid}`);
+        this.logWindowsByPid(slavePid, 'Slave window bounds lookup failed');
       }
     }
   }

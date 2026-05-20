@@ -58,6 +58,14 @@ export const initSyncService = () => {
   }
   
   const windowManager = new (addon as SafeAny).WindowManager();
+  const logWindowsByPid = (pid: number, reason: string) => {
+    try {
+      const windows = windowManager.getAllWindows(pid) || [];
+      logger.warn(`[WindowDebug] ${reason}`, {pid, windowCount: windows.length, windows});
+    } catch (error) {
+      logger.warn(`[WindowDebug] ${reason} (getAllWindows failed)`, {pid, error});
+    }
+  };
 
   logger.info('WindowManager initialized');
 
@@ -71,6 +79,7 @@ export const initSyncService = () => {
       }
       const mainBounds = windowManager.getWindowBounds(mainPid);
       if (!mainBounds?.success) {
+        logWindowsByPid(mainPid, 'Main window bounds lookup failed');
         throw new Error(`Main window not found or inaccessible (PID: ${mainPid})`);
       }
       if (!Array.isArray(childPids) || childPids.length === 0) {
@@ -78,6 +87,9 @@ export const initSyncService = () => {
       }
       const validChildPids = childPids.filter((pid: number) => {
         const bounds = windowManager.getWindowBounds(pid);
+        if (!bounds?.success) {
+          logWindowsByPid(pid, 'Child window bounds lookup failed');
+        }
         return Boolean(bounds?.success);
       });
       if (validChildPids.length === 0) {
