@@ -113,13 +113,14 @@ struct WindowDebugInfo {
     bool ArrangeWindow(HWND hwnd, int x, int y, int width, int height, bool preserveSize = false) {
         if (!hwnd) return false;
         
-        if (IsIconic(hwnd)) {
+        if (IsIconic(hwnd) || IsZoomed(hwnd)) {
             ShowWindow(hwnd, SW_RESTORE);
         }
         SetForegroundWindow(hwnd);
         
+        SetLastError(0);
         LONG style = GetWindowLong(hwnd, GWL_STYLE);
-        if (style == 0) {
+        if (style == 0 && GetLastError() != 0) {
             LOG_ERROR("Failed to get window style");
             return false;
         }
@@ -251,15 +252,25 @@ struct WindowDebugInfo {
             DWORD pid = 0;
             GetWindowThreadProcessId(hwnd, &pid);
 
-            if (pid == processId && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+            if (pid == processId && IsWindowVisible(hwnd)) {
                 char className[256] = {0};
                 GetClassNameA(hwnd, className, sizeof(className));
 
                 char title[256] = {0};
                 GetWindowTextA(hwnd, title, sizeof(title));
 
-                RECT rect;
-                GetWindowRect(hwnd, &rect);
+                RECT rect = {0, 0, 0, 0};
+                if (IsIconic(hwnd)) {
+                    WINDOWPLACEMENT wp;
+                    wp.length = sizeof(wp);
+                    if (GetWindowPlacement(hwnd, &wp)) {
+                        rect = wp.rcNormalPosition;
+                    } else {
+                        GetWindowRect(hwnd, &rect);
+                    }
+                } else {
+                    GetWindowRect(hwnd, &rect);
+                }
 
                 LONG style = GetWindowLong(hwnd, GWL_STYLE);
                 bool isMainWindow = IsMainBrowserWindow(hwnd, style, rect, className);
@@ -710,7 +721,7 @@ struct WindowDebugInfo {
         Napi::Env env = info.Env();
 
         if (info.Length() < 5) {
-            Napi::TypeError::New(env, "Wrong number of arguments");
+            Napi::TypeError::New(env, "Wrong number of arguments").ThrowAsJavaScriptException();
             return env.Null();
         }
 
@@ -737,13 +748,13 @@ struct WindowDebugInfo {
         // Get all available monitors
         auto monitors = GetMonitors();
         if (monitors.empty()) {
-            Napi::Error::New(env, "No monitors found");
+            Napi::Error::New(env, "No monitors found").ThrowAsJavaScriptException();
             return env.Null();
         }
 
         // Validate monitor index
         if (monitorIndex < 0 || monitorIndex >= static_cast<int>(monitors.size())) {
-            Napi::Error::New(env, "Invalid monitor index");
+            Napi::Error::New(env, "Invalid monitor index").ThrowAsJavaScriptException();
             return env.Null();
         }
 

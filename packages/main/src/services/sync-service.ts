@@ -92,6 +92,58 @@ export const initSyncService = () => {
 
     return bounds;
   };
+  const boundsMatch = (
+    actual: {x: number; y: number; width: number; height: number} | undefined,
+    expected: {x: number; y: number; width: number; height: number} | undefined,
+    tolerance = 4,
+  ) => {
+    if (!actual || !expected) return false;
+    const close = (a: number, b: number) => Math.abs(a - b) <= tolerance;
+    return (
+      close(actual.x, expected.x) &&
+      close(actual.y, expected.y) &&
+      close(actual.width, expected.width) &&
+      close(actual.height, expected.height)
+    );
+  };
+  const computeExpectedGridBounds = (args: {
+    screenX: number;
+    screenY: number;
+    screenWidth: number;
+    screenHeight: number;
+    columns: number;
+    spacing: number;
+    size: {width: number; height: number};
+    childCount: number;
+  }) => {
+    const {screenX, screenY, screenWidth, screenHeight, columns, spacing, size, childCount} = args;
+    const totalWindows = childCount + 1;
+    const rows = Math.ceil(totalWindows / columns);
+    const availableWidth = screenWidth - spacing * (columns + 1);
+    const availableHeight = screenHeight - spacing * (rows + 1);
+    const effectiveWidth = size.width > 0 ? size.width : Math.floor(availableWidth / columns);
+    const effectiveHeight = size.height > 0 ? size.height : Math.floor(availableHeight / rows);
+
+    const main = {
+      x: screenX + spacing,
+      y: screenY + spacing,
+      width: effectiveWidth - spacing * 2,
+      height: effectiveHeight - spacing * 2,
+    };
+
+    const children = Array.from({length: childCount}).map((_, i) => {
+      const row = Math.floor((i + 1) / columns);
+      const col = (i + 1) % columns;
+      return {
+        x: screenX + col * effectiveWidth + spacing * (col + 1),
+        y: screenY + row * effectiveHeight + spacing * (row + 1),
+        width: effectiveWidth - spacing,
+        height: effectiveHeight - spacing,
+      };
+    });
+
+    return {main, children};
+  };
   const logWindowsByPid = (pid: number, reason: string) => {
     try {
       const windows = windowManager.getAllWindows(pid) || [];
@@ -131,10 +183,32 @@ export const initSyncService = () => {
       }
       logger.info('arrangeWindows', windowManager.arrangeWindows.toString());
       const beforeMainBounds = getBoundsWithFallback(mainPid);
-      const beforeChildBounds = validChildPids.map((pid: number) => ({
-        pid,
-        bounds: getBoundsWithFallback(pid),
-      }));
+      const beforeChildBounds = validChildPids.map((pid: number) => ({pid, bounds: getBoundsWithFallback(pid)}));
+
+      const effectiveMonitorIndex = monitorIndex ?? 0;
+      const monitors = windowManager.getMonitors?.() || [];
+      if (!Array.isArray(monitors) || monitors.length === 0) {
+        throw new Error('No monitors found');
+      }
+      if (effectiveMonitorIndex < 0 || effectiveMonitorIndex >= monitors.length) {
+        throw new Error(`Invalid monitor index: ${effectiveMonitorIndex}`);
+      }
+      const selectedMonitor = monitors[effectiveMonitorIndex] as {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+      const expected = computeExpectedGridBounds({
+        screenX: selectedMonitor.x,
+        screenY: selectedMonitor.y,
+        screenWidth: selectedMonitor.width,
+        screenHeight: selectedMonitor.height,
+        columns,
+        spacing,
+        size,
+        childCount: validChildPids.length,
+      });
       try {
         // Pass monitorIndex if provided, otherwise let native addon use default (0)
         if (monitorIndex !== undefined) {
@@ -160,6 +234,25 @@ export const initSyncService = () => {
         beforeChildBounds,
         afterChildBounds,
       });
+
+      const expectedMainOk = Boolean(afterMainBounds?.success) && boundsMatch(afterMainBounds, expected.main);
+      const expectedChildrenOk = afterChildBounds.every((entry, i) => {
+        const bounds = entry.bounds;
+        return Boolean(bounds?.success) && boundsMatch(bounds, expected.children[i]);
+      });
+      if (!expectedMainOk || !expectedChildrenOk) {
+        logger.warn('[ArrangeVerify] Arrange had no effect or mismatched expected layout', {
+          mainPid,
+          expected,
+          afterMainBounds,
+          afterChildBounds,
+        });
+        return {
+          success: false,
+          error:
+            'Arrange call did not reach expected bounds. Ensure target windows are not minimized/maximized/snap-locked and run with matching privileges.',
+        };
+      }
 
       return {success: true};
     } catch (error) {
