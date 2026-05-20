@@ -125,7 +125,9 @@ struct WindowDebugInfo {
         }
         
         style &= ~(WS_MAXIMIZE | WS_MINIMIZE);
-        if (SetWindowLong(hwnd, GWL_STYLE, style) == 0) {
+        SetLastError(0);
+        LONG prevStyle = SetWindowLong(hwnd, GWL_STYLE, style);
+        if (prevStyle == 0 && GetLastError() != 0) {
             LOG_ERROR("Failed to set window style");
             return false;
         }
@@ -770,20 +772,25 @@ struct WindowDebugInfo {
             }
         }
 
+        bool hasArrangeFailure = false;
         if (mainWindow) {
             int row = 0;
             int col = 0;
             int x = screenX + col * effectiveWidth + spacing;
             int y = screenY + row * effectiveHeight + spacing;
-            ArrangeWindow(mainWindow->hwnd, x, y, effectiveWidth - spacing * 2, effectiveHeight - spacing * 2);
+            if (!ArrangeWindow(mainWindow->hwnd, x, y, effectiveWidth - spacing * 2, effectiveHeight - spacing * 2)) {
+                hasArrangeFailure = true;
+            }
 
             for (auto ext : mainExtensions) {
-                ArrangeWindow(ext->hwnd,
-                            x + effectiveWidth - ext->width - spacing,
-                            y,
-                            ext->width,
-                            ext->height,
-                            true);
+                if (!ArrangeWindow(ext->hwnd,
+                                x + effectiveWidth - ext->width - spacing,
+                                y,
+                                ext->width,
+                                ext->height,
+                                true)) {
+                    hasArrangeFailure = true;
+                }
             }
         }
 
@@ -828,22 +835,30 @@ struct WindowDebugInfo {
                 int x = screenX + (col * effectiveWidth) + (spacing * (col + 1));
                 int y = screenY + (row * effectiveHeight) + (spacing * (row + 1));
 
-                ArrangeWindow(childMain->hwnd,
-                            x,
-                            y,
-                            effectiveWidth - spacing,
-                            effectiveHeight - spacing);
+                if (!ArrangeWindow(childMain->hwnd,
+                                x,
+                                y,
+                                effectiveWidth - spacing,
+                                effectiveHeight - spacing)) {
+                    hasArrangeFailure = true;
+                }
 
                 // Handle extensions
                 for (auto ext : childExtensions) {
-                    ArrangeWindow(ext->hwnd,
-                                x + effectiveWidth - ext->width - spacing,
-                                y,
-                                ext->width,
-                                ext->height,
-                                true);
+                    if (!ArrangeWindow(ext->hwnd,
+                                    x + effectiveWidth - ext->width - spacing,
+                                    y,
+                                    ext->width,
+                                    ext->height,
+                                    true)) {
+                        hasArrangeFailure = true;
+                    }
                 }
             }
+        }
+        if (hasArrangeFailure) {
+            Napi::Error::New(env, "One or more windows failed to move on Windows").ThrowAsJavaScriptException();
+            return env.Null();
         }
 #elif __APPLE__
         // Use the selected monitor
