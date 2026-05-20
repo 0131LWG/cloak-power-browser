@@ -12,6 +12,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <cstring>
+#include <vector>
+#include <string>
 #endif
 
 // Error logging macro
@@ -98,7 +100,16 @@ public:
     WindowManager(const Napi::CallbackInfo& info) : Napi::ObjectWrap<WindowManager>(info) {}
 
 private:
-    #ifdef _WIN32
+#ifdef _WIN32
+struct WindowDebugInfo {
+    std::string title;
+    std::string className;
+    LONG style;
+    bool visible;
+    bool minimized;
+    RECT rect;
+};
+
     bool ArrangeWindow(HWND hwnd, int x, int y, int width, int height, bool preserveSize = false) {
         if (!hwnd) return false;
         
@@ -156,6 +167,53 @@ private:
         return !IsMainBrowserWindow(hwnd, style, rect, className);
     }
 
+    std::vector<WindowDebugInfo> CollectWindowsByPidDebugInfo(DWORD processId) {
+        std::vector<WindowDebugInfo> infos;
+        HWND hwnd = nullptr;
+        while ((hwnd = FindWindowEx(nullptr, hwnd, nullptr, nullptr)) != nullptr) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != processId) continue;
+
+            WindowDebugInfo info;
+            char className[256] = {0};
+            char title[512] = {0};
+            GetClassNameA(hwnd, className, sizeof(className));
+            GetWindowTextA(hwnd, title, sizeof(title));
+            info.className = className;
+            info.title = title;
+            info.style = GetWindowLong(hwnd, GWL_STYLE);
+            info.visible = IsWindowVisible(hwnd) != 0;
+            info.minimized = IsIconic(hwnd) != 0;
+            RECT rect = {0, 0, 0, 0};
+            GetWindowRect(hwnd, &rect);
+            info.rect = rect;
+            infos.push_back(info);
+        }
+        return infos;
+    }
+
+    void LogWindowsByPidDebugInfo(DWORD processId, const char* reason) {
+        auto infos = CollectWindowsByPidDebugInfo(processId);
+        std::ostringstream oss;
+        oss << "[WindowDebug][Win32] pid=" << processId << " reason=" << (reason ? reason : "<unknown>")
+            << " windowCount=" << infos.size();
+        for (size_t i = 0; i < infos.size(); i++) {
+            const auto& w = infos[i];
+            int width = w.rect.right - w.rect.left;
+            int height = w.rect.bottom - w.rect.top;
+            oss << " | #" << i
+                << " title=" << (w.title.empty() ? "<empty>" : w.title)
+                << " class=" << (w.className.empty() ? "<empty>" : w.className)
+                << " style=0x" << std::hex << static_cast<unsigned long>(w.style) << std::dec
+                << " rect=(" << w.rect.left << "," << w.rect.top << "," << w.rect.right << "," << w.rect.bottom << ")"
+                << " size=" << width << "x" << height
+                << " visible=" << (w.visible ? 1 : 0)
+                << " minimized=" << (w.minimized ? 1 : 0);
+        }
+        std::cerr << oss.str() << std::endl;
+    }
+
     std::vector<WindowInfo> FindWindowsByPid(DWORD processId) {
         std::vector<WindowInfo> windows;
         HWND hwnd = nullptr;
@@ -187,6 +245,9 @@ private:
                     windows.push_back(info);
                 }
             }
+        }
+        if (windows.empty()) {
+            LogWindowsByPidDebugInfo(processId, "FindWindowsByPid returned empty");
         }
         return windows;
     }
