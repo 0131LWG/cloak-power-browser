@@ -749,6 +749,27 @@ struct WindowDebugInfo {
             }
         }
 
+        // Fallback for cloak-style windows: if all windows were classified as extension,
+        // promote the largest one to main window.
+        if (!mainWindow && !mainWindows.empty()) {
+            WindowInfo* largest = &mainWindows[0];
+            int largestArea = largest->width * largest->height;
+            for (auto& win : mainWindows) {
+                int area = win.width * win.height;
+                if (area > largestArea) {
+                    largest = &win;
+                    largestArea = area;
+                }
+            }
+            mainWindow = largest;
+            mainExtensions.clear();
+            for (auto& win : mainWindows) {
+                if (&win != mainWindow) {
+                    mainExtensions.push_back(&win);
+                }
+            }
+        }
+
         if (mainWindow) {
             int row = 0;
             int col = 0;
@@ -866,6 +887,21 @@ struct WindowDebugInfo {
                     mainWindow = &win;
                     break;
                 }
+            }
+
+            // Fallback for cloak-style windows: if none is marked as main,
+            // use the largest one.
+            if (!mainWindow) {
+                WindowInfo* largest = &windows[0];
+                int largestArea = largest->width * largest->height;
+                for (auto& win : windows) {
+                    int area = win.width * win.height;
+                    if (area > largestArea) {
+                        largest = &win;
+                        largestArea = area;
+                    }
+                }
+                mainWindow = largest;
             }
 
             if (mainWindow) {
