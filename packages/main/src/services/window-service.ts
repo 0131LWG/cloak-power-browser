@@ -17,6 +17,9 @@ import {ExtensionDB} from '../db/extension';
 import * as ExcelJS from 'exceljs';
 import {getRuntimePlatformKey, listCloakBrowserRuntimes} from '../cloakbrowser/runtime-manager';
 import {getSettings} from '../utils/get-settings';
+import {randomUUID} from 'crypto';
+import {getCloudSyncConfig} from '../cloud/config';
+import {enqueueSyncOutbox} from '../cloud/sync-outbox';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 
 const isPathInside = (root: string, target: string) => {
@@ -121,16 +124,57 @@ export const initWindowService = () => {
       JSON.stringify(fingerprint),
     );
     console.log(window);
-    return await WindowDB.create(window, fingerprint);
+    const cloudConfig = await getCloudSyncConfig();
+    const windowPayload = cloudConfig.enabled
+      ? {
+          ...window,
+          cloud_id: window.cloud_id || randomUUID(),
+          workspace_id: window.workspace_id || cloudConfig.workspaceId,
+          sync_dirty: true,
+          updated_by_device_id: cloudConfig.deviceId,
+        }
+      : window;
+    const result = await WindowDB.create(windowPayload, fingerprint);
+    if (result.success && result.data?.id) {
+      await enqueueSyncOutbox('window', 'create', {
+        localId: result.data.id,
+        cloudId: result.data.cloud_id,
+        data: result.data,
+      });
+    }
+    return result;
   });
 
   ipcMain.handle('window-update', async (_, id: number, window: DB.Window) => {
-    return await WindowDB.update(id!, window);
+    const cloudConfig = await getCloudSyncConfig();
+    const windowPayload = cloudConfig.enabled
+      ? {
+          ...window,
+          sync_dirty: true,
+          updated_by_device_id: cloudConfig.deviceId,
+        }
+      : window;
+    const result = await WindowDB.update(id!, windowPayload);
+    if (result.success) {
+      await enqueueSyncOutbox('window', 'update', {
+        localId: id,
+        cloudId: windowPayload.cloud_id,
+        data: windowPayload,
+      });
+    }
+    return result;
   });
 
   ipcMain.handle('window-delete', async (_, id: number) => {
+    const windowData = await WindowDB.getById(id);
     await ExtensionDB.deleteWindowReleted(id);
-    return await WindowDB.remove(id);
+    const result = await WindowDB.remove(id);
+    await enqueueSyncOutbox('window', 'delete', {
+      localId: id,
+      cloudId: windowData?.cloud_id,
+      data: windowData,
+    });
+    return result;
   });
   ipcMain.handle('window-batchClear', async (_, ids: number[]) => {
     await ExtensionDB.deleteWindowReleted(ids);

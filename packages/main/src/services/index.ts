@@ -6,6 +6,7 @@ import {initTagService} from './tag-service';
 import {initWindowService} from './window-service';
 import {initExtensionService} from './extension-service';
 import {initMultiWindowSyncService} from './multi-window-sync-service';
+import {initCloudSyncService} from './cloud-sync-service';
 
 export async function initServices() {
   initCommonService();
@@ -16,4 +17,5 @@ export async function initServices() {
   initSyncService();
   initExtensionService();
   initMultiWindowSyncService();
+  initCloudSyncService();
 }

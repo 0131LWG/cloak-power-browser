@@ -22,9 +22,15 @@ vi.mock('electron', () => {
   bw.prototype.focus = vi.fn();
   bw.prototype.restore = vi.fn();
 
-  const app: Pick<Electron.App, 'getAppPath'> = {
+  const app: Pick<Electron.App, 'getAppPath' | 'getPath'> = {
     getAppPath(): string {
       return '';
+    },
+    getPath(): string {
+      return '/tmp';
+    },
+    dock: {
+      setIcon: vi.fn(),
     },
   };
 
@@ -34,7 +40,11 @@ vi.mock('electron', () => {
     // 根据需要模拟其他 ipcMain 方法
   };
 
-  return {BrowserWindow: bw, app, ipcMain};
+  const nativeImage = {
+    createFromPath: vi.fn(() => ({})),
+  };
+
+  return {BrowserWindow: bw, app, ipcMain, nativeImage};
 });
 
 beforeEach(() => {

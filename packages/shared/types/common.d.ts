@@ -11,6 +11,15 @@ export interface SettingOptions {
   chromiumBinPath: string;
   useCloakBrowser?: boolean;
   cloakBrowserPath?: string;
+  cloudSync?: {
+    enabled?: boolean;
+    apiBaseUrl?: string;
+    accessToken?: string;
+    workspaceId?: string;
+    userId?: string;
+    deviceId?: string;
+    deviceName?: string;
+  };
   automationConnect: boolean;
 }
 

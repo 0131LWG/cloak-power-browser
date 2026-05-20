@@ -26,6 +26,10 @@ export namespace DB {
     ua?: string;
     fingerprint?: string | WindowFingerprint;
     browser_engine?: 'chrome' | 'chromium' | 'cloakbrowser' | string;
+    browser_core_family?: string;
+    browser_channel?: 'stable' | 'beta' | 'custom' | string;
+    browser_min_core_version?: string;
+    browser_runtime_overrides?: string | Record<string, string> | null;
     browser_runtime_platform?: string;
     browser_version?: string;
     cookie?: string;
@@ -43,6 +47,14 @@ export namespace DB {
     ip_country?: string;
     ip_checker?: string;
     tags_name?: string[];
+
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
   }
 
   export interface Proxy {
@@ -57,18 +69,39 @@ export namespace DB {
     checking?: boolean;
     remark?: string;
     usageCount?: number;
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
     // ... other properties
   }
 
   export interface Group {
     id?: number;
     name?: string;
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
   }
 
   export interface Tag {
     id?: number;
     name?: string;
     color?: string;
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
   }
 
   export interface Extension {
@@ -86,12 +119,28 @@ export namespace DB {
     auto_update?: boolean | number;
     created_at?: string;
     updated_at?: string;
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
   }
 
   export interface WindowExtension {
     id?: number;
     extension_id?: number;
     window_id?: number;
+    cloud_id?: string | null;
+    workspace_id?: string | null;
+    window_cloud_id?: string | null;
+    extension_cloud_id?: string | null;
+    sync_version?: number;
+    sync_dirty?: boolean | number;
+    sync_deleted_at?: string | null;
+    last_synced_at?: string | null;
+    updated_by_device_id?: string | null;
   }
 }
 

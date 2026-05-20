@@ -36,6 +36,16 @@ const ensureWindowRuntimeColumns = async () => {
       (table: Knex.AlterTableBuilder) => table.string('browser_runtime_platform').nullable(),
     ],
     ['browser_version', (table: Knex.AlterTableBuilder) => table.string('browser_version').nullable()],
+    ['browser_core_family', (table: Knex.AlterTableBuilder) => table.string('browser_core_family').nullable()],
+    ['browser_channel', (table: Knex.AlterTableBuilder) => table.string('browser_channel').nullable()],
+    [
+      'browser_min_core_version',
+      (table: Knex.AlterTableBuilder) => table.string('browser_min_core_version').nullable(),
+    ],
+    [
+      'browser_runtime_overrides',
+      (table: Knex.AlterTableBuilder) => table.json('browser_runtime_overrides').nullable(),
+    ],
   ] as const;
 
   for (const [columnName, addColumn] of columns) {

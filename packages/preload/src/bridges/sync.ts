@@ -55,6 +55,18 @@ export const SyncBridge = {
     return ipcRenderer.invoke('multi-window-sync-status');
   },
 
+  getCloudSyncStatus: () => {
+    return ipcRenderer.invoke('cloud-sync-status');
+  },
+
+  refreshCloudSyncConfig: () => {
+    return ipcRenderer.invoke('cloud-sync-refresh-config');
+  },
+
+  flushCloudSyncOutbox: () => {
+    return ipcRenderer.invoke('cloud-sync-flush-outbox');
+  },
+
   // Listen to global shortcuts from main process
   onShortcutStart: (callback: () => void) => {
     const listener = () => callback();

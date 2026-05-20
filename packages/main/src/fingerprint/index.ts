@@ -29,7 +29,8 @@ import {
   getCloakBrowserPath,
   shouldUseCloakBrowser,
 } from '../cloakbrowser/launcher';
-import {ensureCloakBrowserRuntime} from '../cloakbrowser/runtime-manager';
+import {ensureCloakBrowserRuntimeForWindow} from '../cloakbrowser/runtime-manager';
+import {acquireProfileLock, releaseProfileLock} from '../cloud/profile-lock-service';
 
 const mutex = new Mutex();
 
@@ -143,6 +144,8 @@ const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 
 
 export async function openFingerprintWindow(id: number, headless = false) {
   const release = await mutex.acquire();
+  let profileLockAcquired = false;
+  let windowStarted = false;
   try {
     const windowData = await WindowDB.getById(id);
     
@@ -182,6 +185,26 @@ export async function openFingerprintWindow(id: number, headless = false) {
         });
       }
     }
+
+    const profileLock = await acquireProfileLock(windowData);
+    if (!profileLock.success) {
+      const lockedBy = profileLock.locked_by
+        ? `${profileLock.locked_by.user_name || profileLock.locked_by.user_id || 'unknown user'} / ${
+            profileLock.locked_by.device_name || profileLock.locked_by.device_id || 'unknown device'
+          }`
+        : 'another device';
+      const message =
+        profileLock.reason === 'locked'
+          ? `Profile is already open on ${lockedBy}.`
+          : profileLock.message || 'Failed to acquire profile lock.';
+      bridgeMessageToUI({
+        type: 'warning',
+        text: message,
+      });
+      logger.warn(`Profile lock denied for window ${id}: ${message}`);
+      return null;
+    }
+    profileLockAcquired = profileLock.reason !== 'disabled' && profileLock.reason !== 'missing_cloud_id';
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
     const proxyData = await ProxyDB.getById(windowData.proxy_id);
@@ -227,9 +250,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
     let cloakRuntime = null;
     try {
-      cloakRuntime = useCloakBrowser
-        ? await ensureCloakBrowserRuntime(windowData.browser_version)
-        : null;
+      cloakRuntime = useCloakBrowser ? await ensureCloakBrowserRuntimeForWindow(windowData) : null;
     } catch (error) {
       await WindowDB.update(id, {
         ...windowData,
@@ -425,7 +446,14 @@ export async function openFingerprintWindow(id: number, headless = false) {
           pid: chromeInstance.pid,
           port: chromePort,
           opened_at: db.fn.now() as unknown as string,
+          ...(useCloakBrowser && cloakRuntime
+            ? {
+                browser_runtime_platform: cloakRuntime.platform,
+                browser_version: cloakRuntime.tag,
+              }
+            : {}),
         });
+        windowStarted = true;
         return {
           ...data,
         };
@@ -485,6 +513,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
       return null;
     }
   } finally {
+    if (profileLockAcquired && !windowStarted) {
+      await releaseProfileLock(id);
+    }
     release();
   }
 }
@@ -569,6 +600,7 @@ export async function closeFingerprintWindow(id: number, force = false) {
     }
   }
   await WindowDB.update(id, {...window, status: 1, port: null, pid: null});
+  await releaseProfileLock(id);
   const win = getMainWindow();
   if (win) {
     win.webContents.send('window-closed', id);

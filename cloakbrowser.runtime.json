@@ -7,6 +7,16 @@
         "asset": "cloakbrowser-darwin-arm64.tar.gz",
         "sha256": "505582aa1bd3971c577f70e0cbbe016431702bdb693529abfd943b5bd9120c1c",
         "executable": "Chromium.app/Contents/MacOS/Chromium",
+        "coreFamily": "cloak-v146",
+        "channel": "stable",
+        "capabilities": [
+          "fingerprint.seed",
+          "fingerprint.timezone",
+          "fingerprint.locale",
+          "fingerprint.screen",
+          "fingerprint.webrtc",
+          "extensions.load"
+        ],
         "recommended": true,
         "notes": "macOS arm64 remains on 145.0.7632.109.2 as of chromium-v146.0.7680.177.4."
       }
@@ -17,6 +27,16 @@
         "asset": "cloakbrowser-darwin-x64.tar.gz",
         "sha256": "a0a061b1945db55b3bbe95986a82b67803311c0fedabb3946e7ab0172273daac",
         "executable": "Chromium.app/Contents/MacOS/Chromium",
+        "coreFamily": "cloak-v146",
+        "channel": "stable",
+        "capabilities": [
+          "fingerprint.seed",
+          "fingerprint.timezone",
+          "fingerprint.locale",
+          "fingerprint.screen",
+          "fingerprint.webrtc",
+          "extensions.load"
+        ],
         "recommended": true,
         "notes": "macOS x64 remains on 145.0.7632.109.2 as of chromium-v146.0.7680.177.4."
       }
@@ -27,6 +47,16 @@
         "asset": "cloakbrowser-windows-x64.zip",
         "sha256": "759670947e041a956a198c2d66be501cc767ae8bdba6e33f9b8be76909c4d829",
         "executable": "chrome.exe",
+        "coreFamily": "cloak-v146",
+        "channel": "stable",
+        "capabilities": [
+          "fingerprint.seed",
+          "fingerprint.timezone",
+          "fingerprint.locale",
+          "fingerprint.screen",
+          "fingerprint.webrtc",
+          "extensions.load"
+        ],
         "recommended": true,
         "notes": "Windows x64 was updated in chromium-v146.0.7680.177.4."
       },
@@ -35,6 +65,16 @@
         "asset": "cloakbrowser-windows-x64.zip",
         "sha256": "ee6e984d077f5d71bf7aeef51e58cb596ee5ab2296ca09e2210a37f88e5485ef",
         "executable": "chrome.exe",
+        "coreFamily": "cloak-v145",
+        "channel": "stable",
+        "capabilities": [
+          "fingerprint.seed",
+          "fingerprint.timezone",
+          "fingerprint.locale",
+          "fingerprint.screen",
+          "fingerprint.webrtc",
+          "extensions.load"
+        ],
         "recommended": false,
         "notes": "Previous Windows x64 fallback."
       }

@@ -8,6 +8,7 @@ import https from 'https';
 import path from 'path';
 import {createLogger} from '../../../shared/utils/logger';
 import {WINDOW_LOGGER_LABEL} from '../constants';
+import type {DB} from '../../../shared/types/db';
 
 const logger = createLogger(WINDOW_LOGGER_LABEL);
 
@@ -16,6 +17,9 @@ export interface CloakBrowserRuntime {
   asset: string;
   sha256: string;
   executable: string;
+  coreFamily?: string;
+  channel?: string;
+  capabilities?: string[];
   recommended?: boolean;
   notes?: string;
 }
@@ -58,6 +62,55 @@ export const ensureCloakBrowserRuntime = async (versionTag?: string) => {
 
   if (!runtime) {
     throw new Error(`No CloakBrowser runtime configured for ${platform}`);
+  }
+
+  if (runtime.downloaded && existsSync(runtime.executablePath)) {
+    return runtime;
+  }
+
+  await downloadAndPrepareRuntime(runtime);
+  return {
+    ...runtime,
+    downloaded: existsSync(runtime.executablePath),
+  };
+};
+
+export const ensureCloakBrowserRuntimeForWindow = async (windowData: DB.Window) => {
+  const platform = getRuntimePlatformKey();
+  const runtimes = await listCloakBrowserRuntimes(platform);
+  const overrides = parseRuntimeOverrides(windowData.browser_runtime_overrides);
+  const overrideTag = overrides[platform] || overrides[platform.replace('-', '_')];
+  const requiredCapabilities = getRequiredRuntimeCapabilities(windowData);
+
+  const runtime =
+    (overrideTag
+      ? findCompatibleRuntime(runtimes, {
+          tag: overrideTag,
+          channel: windowData.browser_channel,
+          requiredCapabilities,
+        })
+      : undefined) ||
+    (windowData.browser_core_family
+      ? findCompatibleRuntime(runtimes, {
+          coreFamily: windowData.browser_core_family,
+          channel: windowData.browser_channel,
+          requiredCapabilities,
+        })
+      : undefined) ||
+    findCompatibleRuntime(runtimes, {
+      tag: windowData.browser_version,
+      channel: windowData.browser_channel,
+      requiredCapabilities,
+    }) ||
+    findCompatibleRuntime(runtimes, {
+      channel: windowData.browser_channel,
+      requiredCapabilities,
+    });
+
+  if (!runtime) {
+    throw new Error(
+      `No compatible CloakBrowser runtime configured for ${platform}. core=${windowData.browser_core_family || 'any'}`,
+    );
   }
 
   if (runtime.downloaded && existsSync(runtime.executablePath)) {
@@ -139,6 +192,82 @@ const toRuntimeOption = (
     executablePath,
     downloadUrl: `${manifest.source}/download/${runtime.tag}/${runtime.asset}`,
   };
+};
+
+const parseRuntimeOverrides = (value?: string | Record<string, string> | null) => {
+  if (!value) {
+    return {} as Record<string, string>;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value) as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+
+const findCompatibleRuntime = (
+  runtimes: CloakBrowserRuntimeOption[],
+  options: {
+    tag?: string;
+    coreFamily?: string;
+    channel?: string;
+    requiredCapabilities: string[];
+  },
+) => {
+  const candidates = runtimes.filter(runtime => {
+    if (options.tag && runtime.tag !== options.tag) {
+      return false;
+    }
+    if (options.coreFamily && runtime.coreFamily !== options.coreFamily) {
+      return false;
+    }
+    if (options.channel && runtime.channel && runtime.channel !== options.channel) {
+      return false;
+    }
+    return hasCapabilities(runtime, options.requiredCapabilities);
+  });
+
+  return candidates.find(item => item.recommended) || candidates[0];
+};
+
+const hasCapabilities = (runtime: CloakBrowserRuntimeOption, requiredCapabilities: string[]) => {
+  if (!requiredCapabilities.length) {
+    return true;
+  }
+  const supported = new Set(runtime.capabilities || []);
+  return requiredCapabilities.every(capability => supported.has(capability));
+};
+
+export const getRequiredRuntimeCapabilities = (windowData: DB.Window) => {
+  const fingerprint = parseFingerprint(windowData.fingerprint);
+  const capabilities = new Set<string>();
+
+  if (fingerprint.fingerprintSeed) capabilities.add('fingerprint.seed');
+  if (fingerprint.timezone) capabilities.add('fingerprint.timezone');
+  if (fingerprint.locale) capabilities.add('fingerprint.locale');
+  if (fingerprint.screenWidth || fingerprint.screenHeight) capabilities.add('fingerprint.screen');
+  if (fingerprint.webrtcPolicy) capabilities.add('fingerprint.webrtc');
+
+  return [...capabilities];
+};
+
+const parseFingerprint = (fingerprint?: string | DB.WindowFingerprint) => {
+  if (!fingerprint || fingerprint === '{}') {
+    return {} as DB.WindowFingerprint;
+  }
+  if (typeof fingerprint !== 'string') {
+    return fingerprint;
+  }
+  try {
+    return JSON.parse(fingerprint) as DB.WindowFingerprint;
+  } catch {
+    return {} as DB.WindowFingerprint;
+  }
 };
 
 const getRuntimeDir = (platform: string, tag: string) => {

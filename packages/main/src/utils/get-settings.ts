@@ -17,6 +17,15 @@ export const getSettings = (): SettingOptions => {
     chromiumBinPath: '',
     useCloakBrowser: false,
     cloakBrowserPath: '',
+    cloudSync: {
+      enabled: false,
+      apiBaseUrl: '',
+      accessToken: '',
+      workspaceId: '',
+      userId: '',
+      deviceId: '',
+      deviceName: '',
+    },
     automationConnect: false,
   };
 
@@ -48,6 +57,17 @@ export const getSettings = (): SettingOptions => {
     settings.useCloakBrowser = true;
     settings.useLocalChrome = false;
   }
+  settings.cloudSync = {
+    ...(settings.cloudSync || {}),
+    enabled:
+      process.env.CLOUD_SYNC_ENABLED === '1' || Boolean(settings.cloudSync?.enabled),
+    apiBaseUrl: process.env.CLOUD_SYNC_API_BASE_URL || settings.cloudSync?.apiBaseUrl || '',
+    accessToken: process.env.CLOUD_SYNC_ACCESS_TOKEN || settings.cloudSync?.accessToken || '',
+    workspaceId: process.env.CLOUD_SYNC_WORKSPACE_ID || settings.cloudSync?.workspaceId || '',
+    userId: process.env.CLOUD_SYNC_USER_ID || settings.cloudSync?.userId || '',
+    deviceId: process.env.CLOUD_SYNC_DEVICE_ID || settings.cloudSync?.deviceId || '',
+    deviceName: process.env.CLOUD_SYNC_DEVICE_NAME || settings.cloudSync?.deviceName || '',
+  };
   if (!settings.chromiumBinPath || settings.chromiumBinPath === 'Chrome-bin\\chrome.exe') {
     if (import.meta.env.DEV) {
       settings.chromiumBinPath = 'Chrome-bin\\chrome.exe';

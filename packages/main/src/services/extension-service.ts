@@ -8,6 +8,9 @@ import type {DB} from '../../../shared/types/db';
 import {ExtensionDB} from '../db/extension';
 import {db} from '../db';
 import {getSettings} from '../utils/get-settings';
+import {randomUUID} from 'crypto';
+import {getCloudSyncConfig} from '../cloud/config';
+import {enqueueSyncOutbox} from '../cloud/sync-outbox';
 
 type ExtensionManifest = {
   name?: string;
@@ -292,6 +295,7 @@ const persistInstalledExtension = async ({
 
   const payload: DB.Extension = {
     ...(existingExtension ?? {}),
+    cloud_id: existingExtension?.cloud_id || randomUUID(),
     name: name || existingExtension?.name || `扩展 ${extensionId}`,
     version,
     path: versionDir,
@@ -314,10 +318,20 @@ const persistInstalledExtension = async ({
 
   if (existingExtension?.id) {
     await ExtensionDB.updateExtension(existingExtension.id, payload);
+    await enqueueSyncOutbox('extension', 'update', {
+      localId: existingExtension.id,
+      cloudId: payload.cloud_id,
+      data: payload,
+    });
   } else {
     await ExtensionDB.createExtension({
       ...payload,
       created_at: db.fn.now() as unknown as string,
+    });
+    await enqueueSyncOutbox('extension', 'create', {
+      localId: extensionId,
+      cloudId: payload.cloud_id,
+      data: payload,
     });
   }
 
@@ -401,13 +415,25 @@ const deleteManagedExtensionFiles = async (extensionId: number) => {
 
 export const initExtensionService = () => {
   ipcMain.handle('extension-create', async (_, extension: DB.Extension) => {
-    return await ExtensionDB.createExtension({
+    const cloudConfig = await getCloudSyncConfig();
+    const payload = {
       ...extension,
+      cloud_id: extension.cloud_id || randomUUID(),
+      workspace_id: extension.workspace_id || cloudConfig.workspaceId,
+      sync_dirty: cloudConfig.enabled,
+      updated_by_device_id: cloudConfig.deviceId,
       distribution_mode: extension.distribution_mode ?? 'global',
       auto_update:
         typeof extension.auto_update === 'boolean' ? extension.auto_update : extension.auto_update !== 0,
       updated_at: db.fn.now() as unknown as string,
+    };
+    const result = await ExtensionDB.createExtension(payload);
+    await enqueueSyncOutbox('extension', 'create', {
+      localId: result?.[0],
+      cloudId: payload.cloud_id,
+      data: payload,
     });
+    return result;
   });
 
   ipcMain.handle('extension-get-all', async () => {
@@ -456,8 +482,14 @@ export const initExtensionService = () => {
 
   ipcMain.handle('extension-delete', async (_, extensionId: number) => {
     try {
+      const extension = await ExtensionDB.getExtensionById(extensionId);
       await ExtensionDB.deleteExtension(extensionId);
       await deleteManagedExtensionFiles(extensionId);
+      await enqueueSyncOutbox('extension', 'delete', {
+        localId: extensionId,
+        cloudId: extension?.cloud_id,
+        data: extension,
+      });
       return {
         success: true,
       };
@@ -472,10 +504,20 @@ export const initExtensionService = () => {
   ipcMain.handle(
     'extension-update',
     async (_, extensionId: number, extension: Partial<DB.Extension>) => {
-      return await ExtensionDB.updateExtension(extensionId, {
+      const cloudConfig = await getCloudSyncConfig();
+      const payload = {
         ...extension,
+        sync_dirty: cloudConfig.enabled,
+        updated_by_device_id: cloudConfig.deviceId,
         updated_at: db.fn.now() as unknown as string,
+      };
+      const result = await ExtensionDB.updateExtension(extensionId, payload);
+      await enqueueSyncOutbox('extension', 'update', {
+        localId: extensionId,
+        cloudId: payload.cloud_id,
+        data: payload,
       });
+      return result;
     },
   );
 
