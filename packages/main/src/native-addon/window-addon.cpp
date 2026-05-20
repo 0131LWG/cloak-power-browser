@@ -137,10 +137,23 @@ private:
         return true;
     }
 
-    bool IsExtensionWindow(const char* title, const char* className) {
-        return title != nullptr &&
-               strlen(title) > 0 &&
-               strstr(title, "Google Chrome") == nullptr;
+    bool IsMainBrowserWindow(HWND hwnd, LONG style, const RECT& rect, const char* className) {
+        if (!hwnd) return false;
+        if (style & WS_CHILD) return false;
+        if (!(style & WS_OVERLAPPEDWINDOW)) return false;
+        if (style & WS_POPUP) return false;
+        if (!className || strstr(className, "Chrome_WidgetWin") == nullptr) return false;
+
+        const int width = rect.right - rect.left;
+        const int height = rect.bottom - rect.top;
+        // Filter out tiny tool/utility windows
+        if (width < 240 || height < 180) return false;
+
+        return true;
+    }
+
+    bool IsExtensionWindow(HWND hwnd, LONG style, const RECT& rect, const char* className) {
+        return !IsMainBrowserWindow(hwnd, style, rect, className);
     }
 
     std::vector<WindowInfo> FindWindowsByPid(DWORD processId) {
@@ -161,9 +174,9 @@ private:
                 RECT rect;
                 GetWindowRect(hwnd, &rect);
 
-                bool isExtension = IsExtensionWindow(title, className);
-                bool isMainWindow = strstr(title, "Google Chrome") != nullptr &&
-                                  (GetWindowLong(hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW);
+                LONG style = GetWindowLong(hwnd, GWL_STYLE);
+                bool isMainWindow = IsMainBrowserWindow(hwnd, style, rect, className);
+                bool isExtension = IsExtensionWindow(hwnd, style, rect, className);
 
                 if (isMainWindow || isExtension) {
                     WindowInfo info;
