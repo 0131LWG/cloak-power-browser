@@ -132,6 +132,11 @@ const Windows = () => {
       label: t('window_clear_cache'),
       icon: <ClearOutlined />,
     },
+    {
+      key: 'refresh-fingerprint',
+      label: '更新指纹',
+      icon: <SyncOutlined />,
+    },
     // {
     //   key: 'set-cookie',
     //   label: t('window_set_cookie'),
@@ -606,9 +611,55 @@ const Windows = () => {
         setSelectedRow(recorder);
         await setCookie(recorder);
         break;
+      case 'refresh-fingerprint':
+        await refreshFingerprint(recorder);
+        break;
 
       default:
         break;
+    }
+  };
+
+  const refreshFingerprint = async (window: DB.Window) => {
+    if (!window.id) {
+      messageApi.warning('Window ID is empty');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const latestWindow = await WindowBridge.getById(window.id);
+      if (!latestWindow) {
+        messageApi.error('Window not found');
+        return;
+      }
+
+      let currentFingerprint: Record<string, unknown> = {};
+      if (latestWindow.fingerprint && typeof latestWindow.fingerprint === 'string') {
+        try {
+          currentFingerprint = JSON.parse(latestWindow.fingerprint);
+        } catch {
+          currentFingerprint = {};
+        }
+      } else if (latestWindow.fingerprint && typeof latestWindow.fingerprint === 'object') {
+        currentFingerprint = latestWindow.fingerprint as Record<string, unknown>;
+      }
+
+      const nextFingerprint = {
+        ...currentFingerprint,
+        fingerprintSeed: String(Math.floor(Math.random() * 90000) + 10000),
+      };
+
+      await WindowBridge.update(latestWindow.id!, {
+        ...latestWindow,
+        fingerprint: nextFingerprint,
+      });
+      messageApi.success('Fingerprint updated successfully');
+      await fetchWindowData();
+    } catch (error) {
+      messageApi.error('Failed to update fingerprint');
+    } finally {
+      setLoading(false);
     }
   };
 
