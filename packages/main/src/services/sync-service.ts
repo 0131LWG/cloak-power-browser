@@ -130,6 +130,11 @@ export const initSyncService = () => {
         throw new Error('No valid child windows found for arrangement');
       }
       logger.info('arrangeWindows', windowManager.arrangeWindows.toString());
+      const beforeMainBounds = getBoundsWithFallback(mainPid);
+      const beforeChildBounds = validChildPids.map((pid: number) => ({
+        pid,
+        bounds: getBoundsWithFallback(pid),
+      }));
       try {
         // Pass monitorIndex if provided, otherwise let native addon use default (0)
         if (monitorIndex !== undefined) {
@@ -141,6 +146,20 @@ export const initSyncService = () => {
         logger.error('Native function execution error:', e);
         throw e;
       }
+
+      // Post-check: verify whether bounds changed after native arrange call
+      const afterMainBounds = getBoundsWithFallback(mainPid);
+      const afterChildBounds = validChildPids.map((pid: number) => ({
+        pid,
+        bounds: getBoundsWithFallback(pid),
+      }));
+      logger.info('[ArrangeVerify] Bounds before/after', {
+        mainPid,
+        beforeMainBounds,
+        afterMainBounds,
+        beforeChildBounds,
+        afterChildBounds,
+      });
 
       return {success: true};
     } catch (error) {
