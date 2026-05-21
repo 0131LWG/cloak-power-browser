@@ -18,6 +18,7 @@ export namespace DB {
     name?: string;
     group_id?: number | null;
     group_name?: string;
+    group_cloud_id?: string | null;
     tags?: number[] | string[] | null | string;
     remark?: string;
     opened_at?: string;
@@ -42,6 +43,7 @@ export namespace DB {
     local_proxy_port?: number;
 
     proxy_id?: number | null;
+    proxy_cloud_id?: string | null;
     proxy?: string;
     proxy_type?: string;
     ip_country?: string;

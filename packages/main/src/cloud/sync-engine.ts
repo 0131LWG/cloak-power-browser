@@ -282,27 +282,7 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
       ]);
       return;
     case 'window':
-      await applyEntityUpsertOrDelete('window', cloudId, event.operation, payload, [
-        'profile_id',
-        'name',
-        'tags',
-        'remark',
-        'cookie',
-        'ua',
-        'fingerprint',
-        'browser_engine',
-        'browser_core_family',
-        'browser_channel',
-        'browser_min_core_version',
-        'browser_runtime_overrides',
-        'browser_runtime_platform',
-        'browser_version',
-        'workspace_id',
-        'sync_version',
-        'sync_deleted_at',
-        'last_synced_at',
-        'updated_by_device_id',
-      ]);
+      await applyWindowSyncEvent(cloudId, event.operation, payload);
       return;
     case 'extension':
       await applyEntityUpsertOrDelete('extension', cloudId, event.operation, payload, [
@@ -325,6 +305,47 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
     default:
       return;
   }
+};
+
+const applyWindowSyncEvent = async (
+  cloudId: string,
+  operation: 'create' | 'update' | 'delete',
+  payload: Record<string, unknown>,
+) => {
+  const groupCloudId = toNullableString(payload.group_cloud_id);
+  const proxyCloudId = toNullableString(payload.proxy_cloud_id);
+  const groupId = groupCloudId ? await findLocalIdByCloudId('group', groupCloudId) : null;
+  const proxyId = proxyCloudId ? await findLocalIdByCloudId('proxy', proxyCloudId) : null;
+
+  const normalizedPayload = {
+    ...payload,
+    ...(groupCloudId ? {group_id: groupId} : {}),
+    ...(proxyCloudId ? {proxy_id: proxyId} : {}),
+  };
+
+  await applyEntityUpsertOrDelete('window', cloudId, operation, normalizedPayload, [
+        'profile_id',
+        'name',
+        'group_id',
+        'proxy_id',
+        'tags',
+        'remark',
+        'cookie',
+        'ua',
+        'fingerprint',
+        'browser_engine',
+        'browser_core_family',
+        'browser_channel',
+        'browser_min_core_version',
+        'browser_runtime_overrides',
+        'browser_runtime_platform',
+        'browser_version',
+        'workspace_id',
+        'sync_version',
+        'sync_deleted_at',
+        'last_synced_at',
+        'updated_by_device_id',
+      ]);
 };
 
 const applyEntityUpsertOrDelete = async (
@@ -363,4 +384,17 @@ const sanitizePayload = (payload: Record<string, unknown>, allowedFields: string
     }
   }
   return sanitized;
+};
+
+const findLocalIdByCloudId = async (tableName: string, cloudId: string) => {
+  const row = await db(tableName).select('id').where({cloud_id: cloudId}).first();
+  return row?.id ?? null;
+};
+
+const toNullableString = (value: unknown) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  return text ? text : null;
 };

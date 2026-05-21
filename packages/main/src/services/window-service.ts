@@ -20,6 +20,8 @@ import {getSettings} from '../utils/get-settings';
 import {randomUUID} from 'crypto';
 import {getCloudSyncConfig} from '../cloud/config';
 import {enqueueSyncOutbox} from '../cloud/sync-outbox';
+import {GroupDB} from '../db/group';
+import {ProxyDB} from '../db/proxy';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 
 const isPathInside = (root: string, target: string) => {
@@ -96,6 +98,30 @@ const clearWindowCache = async (ids: number[]) => {
     data: results,
   };
 };
+
+const withWindowRelationCloudIds = async (windowData?: DB.Window | null) => {
+  if (!windowData) {
+    return windowData;
+  }
+
+  let groupCloudId: string | null = null;
+  let proxyCloudId: string | null = null;
+
+  if (windowData.group_id) {
+    const group = await GroupDB.getById(windowData.group_id);
+    groupCloudId = group?.cloud_id || null;
+  }
+  if (windowData.proxy_id) {
+    const proxy = await ProxyDB.getById(windowData.proxy_id);
+    proxyCloudId = proxy?.cloud_id || null;
+  }
+
+  return {
+    ...windowData,
+    group_cloud_id: groupCloudId,
+    proxy_cloud_id: proxyCloudId,
+  };
+};
 export const initWindowService = () => {
   logger.info('init window service...');
   ipcMain.handle('window-import', async (_, filePath: string) => {
@@ -136,10 +162,11 @@ export const initWindowService = () => {
       : window;
     const result = await WindowDB.create(windowPayload, fingerprint);
     if (result.success && result.data?.id) {
+      const syncPayload = await withWindowRelationCloudIds(result.data);
       await enqueueSyncOutbox('window', 'create', {
         localId: result.data.id,
         cloudId: result.data.cloud_id,
-        data: result.data,
+        data: syncPayload,
       });
     }
     return result;
@@ -156,10 +183,12 @@ export const initWindowService = () => {
       : window;
     const result = await WindowDB.update(id!, windowPayload);
     if (result.success) {
+      const latestWindow = await WindowDB.getById(id);
+      const syncPayload = await withWindowRelationCloudIds(latestWindow || windowPayload);
       await enqueueSyncOutbox('window', 'update', {
         localId: id,
         cloudId: windowPayload.cloud_id,
-        data: windowPayload,
+        data: syncPayload,
       });
     }
     return result;
