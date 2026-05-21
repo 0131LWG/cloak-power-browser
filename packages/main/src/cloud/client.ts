@@ -62,12 +62,12 @@ export class CloudApiClient {
     }
 
     if (!this.http) {
-      const shouldBypassProxy = isLocalOrLanHost(config.apiBaseUrl);
       this.http = axios.create({
         baseURL: config.apiBaseUrl,
         timeout: 15000,
-        // Avoid system HTTP(S)_PROXY hijacking local/LAN sync traffic.
-        proxy: shouldBypassProxy ? false : undefined,
+        // Cloud sync must talk to the configured service directly. System proxy
+        // variables often point to local ports that are not available in the app.
+        proxy: false,
         headers: {
           ...(config.accessToken ? {Authorization: `Bearer ${config.accessToken}`} : {}),
           'x-workspace-id': config.workspaceId || '',
@@ -82,41 +82,3 @@ export class CloudApiClient {
 }
 
 export const cloudApiClient = new CloudApiClient();
-
-const isLocalOrLanHost = (baseUrl: string) => {
-  try {
-    const url = new URL(baseUrl);
-    const hostname = (url.hostname || '').toLowerCase();
-
-    if (!hostname) {
-      return false;
-    }
-
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-      return true;
-    }
-
-    // 10.0.0.0/8
-    if (hostname.startsWith('10.')) {
-      return true;
-    }
-
-    // 172.16.0.0 - 172.31.255.255
-    const match172 = hostname.match(/^172\.(\d{1,3})\./);
-    if (match172) {
-      const second = Number(match172[1]);
-      if (second >= 16 && second <= 31) {
-        return true;
-      }
-    }
-
-    // 192.168.0.0/16
-    if (hostname.startsWith('192.168.')) {
-      return true;
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
-};
