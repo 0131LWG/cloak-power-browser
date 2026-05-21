@@ -67,6 +67,10 @@ export const SyncBridge = {
     return ipcRenderer.invoke('cloud-sync-flush-outbox');
   },
 
+  pullCloudSync: () => {
+    return ipcRenderer.invoke('cloud-sync-pull');
+  },
+
   // Listen to global shortcuts from main process
   onShortcutStart: (callback: () => void) => {
     const listener = () => callback();

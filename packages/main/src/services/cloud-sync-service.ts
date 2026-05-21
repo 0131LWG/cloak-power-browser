@@ -2,7 +2,12 @@ import {ipcMain} from 'electron';
 import {cloudApiClient} from '../cloud/client';
 import {getCloudSyncConfig} from '../cloud/config';
 import {releaseAllProfileLocks} from '../cloud/profile-lock-service';
-import {flushSyncOutbox, startCloudSyncEngine, stopCloudSyncEngine} from '../cloud/sync-engine';
+import {
+  flushSyncOutbox,
+  pullSyncEvents,
+  startCloudSyncEngine,
+  stopCloudSyncEngine,
+} from '../cloud/sync-engine';
 
 export const initCloudSyncService = () => {
   startCloudSyncEngine().catch(() => {
@@ -30,6 +35,10 @@ export const initCloudSyncService = () => {
 
   ipcMain.handle('cloud-sync-flush-outbox', async () => {
     return await flushSyncOutbox();
+  });
+
+  ipcMain.handle('cloud-sync-pull', async () => {
+    return await pullSyncEvents();
   });
 
   ipcMain.handle('cloud-sync-release-locks', async () => {
