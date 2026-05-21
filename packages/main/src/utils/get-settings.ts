@@ -57,14 +57,21 @@ export const getSettings = (): SettingOptions => {
     settings.useCloakBrowser = true;
     settings.useLocalChrome = false;
   }
+  const envCloudAccessToken = process.env.CLOUD_SYNC_ACCESS_TOKEN || '';
+  const savedCloudAccessToken = settings.cloudSync?.accessToken || '';
+  const preferSavedCloudIdentity = Boolean(savedCloudAccessToken && !envCloudAccessToken);
   settings.cloudSync = {
     ...(settings.cloudSync || {}),
     enabled:
       process.env.CLOUD_SYNC_ENABLED === '1' || Boolean(settings.cloudSync?.enabled),
     apiBaseUrl: process.env.CLOUD_SYNC_API_BASE_URL || settings.cloudSync?.apiBaseUrl || '',
-    accessToken: process.env.CLOUD_SYNC_ACCESS_TOKEN || settings.cloudSync?.accessToken || '',
-    workspaceId: process.env.CLOUD_SYNC_WORKSPACE_ID || settings.cloudSync?.workspaceId || '',
-    userId: process.env.CLOUD_SYNC_USER_ID || settings.cloudSync?.userId || '',
+    accessToken: envCloudAccessToken || savedCloudAccessToken,
+    workspaceId: preferSavedCloudIdentity
+      ? settings.cloudSync?.workspaceId || process.env.CLOUD_SYNC_WORKSPACE_ID || ''
+      : process.env.CLOUD_SYNC_WORKSPACE_ID || settings.cloudSync?.workspaceId || '',
+    userId: preferSavedCloudIdentity
+      ? settings.cloudSync?.userId || process.env.CLOUD_SYNC_USER_ID || ''
+      : process.env.CLOUD_SYNC_USER_ID || settings.cloudSync?.userId || '',
     deviceId: process.env.CLOUD_SYNC_DEVICE_ID || settings.cloudSync?.deviceId || '',
     deviceName: process.env.CLOUD_SYNC_DEVICE_NAME || settings.cloudSync?.deviceName || '',
   };

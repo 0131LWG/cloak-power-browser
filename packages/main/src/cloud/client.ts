@@ -32,7 +32,19 @@ export class CloudApiClient {
       const response = await http.request<T>({method, url: path, data});
       return response.data;
     } catch (error) {
-      logger.error(`Cloud request failed: ${method.toUpperCase()} ${path}`, error);
+      const config = await this.getConfig();
+      if (axios.isAxiosError(error)) {
+        logger.error(`Cloud request failed: ${method.toUpperCase()} ${path}`, {
+          status: error.response?.status,
+          response: error.response?.data,
+          message: error.message,
+          workspaceId: config.workspaceId,
+          deviceId: config.deviceId,
+          hasAccessToken: Boolean(config.accessToken),
+        });
+      } else {
+        logger.error(`Cloud request failed: ${method.toUpperCase()} ${path}`, error);
+      }
       throw error;
     }
   }
