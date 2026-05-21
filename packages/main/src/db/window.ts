@@ -9,6 +9,7 @@ const all = async () => {
   return await db('window')
     .select(
       'window.id',
+      'window.cloud_id',
       'window.group_id',
       'window.proxy_id',
       'window.tags',
@@ -45,6 +46,7 @@ const getOpenedWindows = async () => {
   return await db('window')
     .select(
       'window.id',
+      'window.cloud_id',
       'window.group_id',
       'window.proxy_id',
       'window.tags',

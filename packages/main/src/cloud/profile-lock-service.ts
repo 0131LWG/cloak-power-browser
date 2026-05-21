@@ -26,7 +26,11 @@ export const acquireProfileLock = async (windowData: DB.Window): Promise<Profile
   }
 
   if (!isCloudLockedWindow(windowData)) {
-    return {success: true, reason: 'missing_cloud_id'};
+    return {
+      success: false,
+      reason: 'missing_cloud_id',
+      message: 'Window has no cloud_id. Please sync this window before opening it on team mode.',
+    };
   }
 
   const profileCloudId = windowData.cloud_id!;
