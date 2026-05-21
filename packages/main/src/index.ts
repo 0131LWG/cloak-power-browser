@@ -13,12 +13,16 @@ const logger = createLogger(MAIN_LOGGER_LABEL);
 /**
  * Prevent electron from running multiple instances.
  */
-const isSingleInstance = app.requestSingleInstanceLock();
+const allowMultiInstance =
+  process.env.ALLOW_MULTI_INSTANCE === '1' || process.env.CLOUD_SYNC_MULTI_INSTANCE_TEST === '1';
+const isSingleInstance = allowMultiInstance ? true : app.requestSingleInstanceLock();
 if (!isSingleInstance) {
   app.quit();
   process.exit(0);
 }
-app.on('second-instance', restoreOrCreateWindow);
+if (!allowMultiInstance) {
+  app.on('second-instance', restoreOrCreateWindow);
+}
 
 /**
  * Disable Hardware Acceleration to save more system resources.

@@ -3,8 +3,10 @@ import {randomUUID} from 'crypto';
 import {db} from '../db';
 import {getSettings} from '../utils/get-settings';
 import type {CloudSyncConfig} from './types';
+import {ensureCloudSyncSchema} from './schema';
 
 const getOrCreateDeviceId = async () => {
+  await ensureCloudSyncSchema();
   const settings = getSettings();
   const configuredDeviceId = settings.cloudSync?.deviceId;
   if (configuredDeviceId) {

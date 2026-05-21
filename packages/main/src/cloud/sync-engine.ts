@@ -2,6 +2,7 @@ import {db} from '../db';
 import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
 import {cloudApiClient} from './client';
+import {ensureCloudSyncSchema} from './schema';
 
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 const DEFAULT_FLUSH_LIMIT = 50;
@@ -11,6 +12,7 @@ let flushTimer: NodeJS.Timeout | undefined;
 let isFlushing = false;
 
 export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
+  await ensureCloudSyncSchema();
   const config = await cloudApiClient.getConfig();
   if (!config.enabled) {
     return {success: true, skipped: true, count: 0};
@@ -81,6 +83,7 @@ export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
 };
 
 export const startCloudSyncEngine = async () => {
+  await ensureCloudSyncSchema();
   const config = await cloudApiClient.getConfig();
   if (!config.enabled || flushTimer) {
     return;

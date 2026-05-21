@@ -57,6 +57,77 @@ const ensureWindowRuntimeColumns = async () => {
   }
 };
 
+const ensureColumn = async (
+  tableName: string,
+  columnName: string,
+  addColumn: (table: Knex.AlterTableBuilder) => void,
+) => {
+  const hasTable = await db.schema.hasTable(tableName);
+  if (!hasTable) {
+    return;
+  }
+  const hasColumn = await db.schema.hasColumn(tableName, columnName);
+  if (!hasColumn) {
+    await db.schema.table(tableName, addColumn);
+    console.log(`Added missing ${tableName} column: ${columnName}`);
+  }
+};
+
+const ensureCloudSyncColumns = async () => {
+  const baseTables = ['group', 'proxy', 'tag', 'window', 'extension'];
+  for (const tableName of baseTables) {
+    await ensureColumn(tableName, 'cloud_id', table => table.string('cloud_id').nullable());
+    await ensureColumn(tableName, 'workspace_id', table => table.string('workspace_id').nullable());
+    await ensureColumn(tableName, 'sync_version', table => table.integer('sync_version').defaultTo(0));
+    await ensureColumn(tableName, 'sync_dirty', table => table.boolean('sync_dirty').defaultTo(false));
+    await ensureColumn(tableName, 'sync_deleted_at', table => table.timestamp('sync_deleted_at').nullable());
+    await ensureColumn(tableName, 'last_synced_at', table => table.timestamp('last_synced_at').nullable());
+    await ensureColumn(tableName, 'updated_by_device_id', table =>
+      table.string('updated_by_device_id').nullable(),
+    );
+  }
+
+  await ensureColumn('window', 'browser_core_family', table =>
+    table.string('browser_core_family').nullable(),
+  );
+  await ensureColumn('window', 'browser_channel', table => table.string('browser_channel').nullable());
+  await ensureColumn('window', 'browser_min_core_version', table =>
+    table.string('browser_min_core_version').nullable(),
+  );
+  await ensureColumn('window', 'browser_runtime_overrides', table =>
+    table.json('browser_runtime_overrides').nullable(),
+  );
+
+  const hasWindowExtension = await db.schema.hasTable('window_extension');
+  if (hasWindowExtension) {
+    await ensureColumn('window_extension', 'cloud_id', table => table.string('cloud_id').nullable());
+    await ensureColumn('window_extension', 'workspace_id', table =>
+      table.string('workspace_id').nullable(),
+    );
+    await ensureColumn('window_extension', 'window_cloud_id', table =>
+      table.string('window_cloud_id').nullable(),
+    );
+    await ensureColumn('window_extension', 'extension_cloud_id', table =>
+      table.string('extension_cloud_id').nullable(),
+    );
+    await ensureColumn('window_extension', 'sync_version', table =>
+      table.integer('sync_version').defaultTo(0),
+    );
+    await ensureColumn('window_extension', 'sync_dirty', table =>
+      table.boolean('sync_dirty').defaultTo(false),
+    );
+    await ensureColumn('window_extension', 'sync_deleted_at', table =>
+      table.timestamp('sync_deleted_at').nullable(),
+    );
+    await ensureColumn('window_extension', 'last_synced_at', table =>
+      table.timestamp('last_synced_at').nullable(),
+    );
+    await ensureColumn('window_extension', 'updated_by_device_id', table =>
+      table.string('updated_by_device_id').nullable(),
+    );
+  }
+};
+
 const initializeDatabase = async () => {
   const userDataPath = app.getPath('userData');
 
@@ -71,6 +142,7 @@ const initializeDatabase = async () => {
 
     // Defensive schema repair before migrations for users stuck in a partially upgraded database.
     await ensureWindowRuntimeColumns();
+    await ensureCloudSyncColumns();
 
     // 运行迁移
     try {
@@ -84,6 +156,7 @@ const initializeDatabase = async () => {
 
     // Defensive schema repair after migrations too. This keeps old packaged builds recoverable.
     await ensureWindowRuntimeColumns();
+    await ensureCloudSyncColumns();
 
     // 初始化窗口状态
     await initWindowStatus();

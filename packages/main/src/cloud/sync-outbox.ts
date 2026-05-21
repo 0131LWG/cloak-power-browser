@@ -1,5 +1,6 @@
 import {db} from '../db';
 import {getCloudSyncConfig} from './config';
+import {ensureCloudSyncSchema} from './schema';
 
 export type SyncEntityType =
   | 'group'
@@ -20,6 +21,7 @@ export const enqueueSyncOutbox = async (
     data?: unknown;
   },
 ) => {
+  await ensureCloudSyncSchema();
   const config = await getCloudSyncConfig();
   if (!config.enabled) {
     return;
