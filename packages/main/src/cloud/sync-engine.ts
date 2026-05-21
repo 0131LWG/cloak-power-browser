@@ -185,7 +185,17 @@ export const pullSyncEvents = async (limit = DEFAULT_PULL_LIMIT) => {
       if (event.device_id && event.device_id === config.deviceId) {
         continue;
       }
-      await applySyncEvent(event);
+      try {
+        await applySyncEvent(event);
+      } catch (error) {
+        logger.error('Cloud sync apply event failed', {
+          error: error instanceof Error ? error.message : String(error),
+          entityType: event.entity_type,
+          operation: event.operation,
+          cloudId: event.cloud_id,
+          cursor: event.cursor,
+        });
+      }
     }
 
     await upsertSyncCursor(config.workspaceId, maxCursor);
@@ -254,8 +264,6 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
       await applyEntityUpsertOrDelete('window', cloudId, event.operation, payload, [
         'profile_id',
         'name',
-        'group_id',
-        'proxy_id',
         'tags',
         'remark',
         'cookie',
