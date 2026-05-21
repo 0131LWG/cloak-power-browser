@@ -178,15 +178,22 @@ export const pullSyncEvents = async (limit = DEFAULT_PULL_LIMIT) => {
     }
 
     let maxCursor = cursor;
+    let appliedCount = 0;
     for (const event of events) {
-      if ((event.cursor || 0) > maxCursor) {
-        maxCursor = event.cursor || 0;
-      }
+      const eventCursor = event.cursor || 0;
       if (event.device_id && event.device_id === config.deviceId) {
+        if (eventCursor > maxCursor) {
+          maxCursor = eventCursor;
+        }
         continue;
       }
+
       try {
         await applySyncEvent(event);
+        appliedCount++;
+        if (eventCursor > maxCursor) {
+          maxCursor = eventCursor;
+        }
       } catch (error) {
         logger.error('Cloud sync apply event failed', {
           error: error instanceof Error ? error.message : String(error),
@@ -195,17 +202,31 @@ export const pullSyncEvents = async (limit = DEFAULT_PULL_LIMIT) => {
           cloudId: event.cloud_id,
           cursor: event.cursor,
         });
+        // Keep cursor at last successfully applied event so failed event can be retried.
+        break;
       }
     }
 
     await upsertSyncCursor(config.workspaceId, maxCursor);
-    return {success: true, count: events.length, next_cursor: maxCursor};
+    return {success: true, count: appliedCount, next_cursor: maxCursor};
   } catch (error) {
     logger.error('Cloud sync pull failed', error);
     return {success: false, count: 0, error: error instanceof Error ? error.message : String(error)};
   } finally {
     isPulling = false;
   }
+};
+
+export const resetSyncCursor = async (workspaceId?: string) => {
+  await ensureCloudSyncSchema();
+  const config = await cloudApiClient.getConfig();
+  const targetWorkspace = workspaceId || config.workspaceId;
+  if (!targetWorkspace) {
+    return {success: false, message: 'workspace_id is required'};
+  }
+
+  await db('sync_state').where({workspace_id: targetWorkspace, entity_type: SYNC_STATE_ENTITY}).delete();
+  return {success: true, workspace_id: targetWorkspace};
 };
 
 const upsertSyncCursor = async (workspaceId: string, cursor: number) => {

@@ -5,6 +5,7 @@ import {releaseAllProfileLocks} from '../cloud/profile-lock-service';
 import {
   flushSyncOutbox,
   pullSyncEvents,
+  resetSyncCursor,
   startCloudSyncEngine,
   stopCloudSyncEngine,
 } from '../cloud/sync-engine';
@@ -39,6 +40,10 @@ export const initCloudSyncService = () => {
 
   ipcMain.handle('cloud-sync-pull', async () => {
     return await pullSyncEvents();
+  });
+
+  ipcMain.handle('cloud-sync-reset-cursor', async (_, workspaceId?: string) => {
+    return await resetSyncCursor(workspaceId);
   });
 
   ipcMain.handle('cloud-sync-release-locks', async () => {
