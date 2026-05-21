@@ -5,6 +5,22 @@ export type CloudTeam = {
   id: string;
   name: string;
   role?: string;
+  invite_code?: string;
+};
+
+export type JoinRequest = {
+  id: string;
+  team_id: string;
+  user_id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  message?: string;
+  created_at?: string;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  team?: CloudTeam;
 };
 
 export const getSavedSettings = async () => {

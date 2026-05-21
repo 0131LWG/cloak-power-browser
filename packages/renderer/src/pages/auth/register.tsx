@@ -16,7 +16,6 @@ type RegisterForm = {
   email: string;
   password: string;
   confirmPassword: string;
-  teamName: string;
 };
 
 export default function Register() {
@@ -55,7 +54,6 @@ export default function Register() {
           email: values.email,
           password: values.password,
           name: values.name,
-          team_name: values.teamName,
         }),
       });
 
@@ -63,10 +61,10 @@ export default function Register() {
         apiBaseUrl,
         accessToken: result.access_token,
         userId: result.user?.id || '',
-        workspaceId: result.team?.id || '',
+        workspaceId: '',
       });
 
-      navigate(result.team?.id ? '/' : '/auth/team-select', {replace: true});
+      navigate('/auth/team-select', {replace: true});
     } catch (error) {
       messageApi.error((error as Error).message);
     } finally {
@@ -88,7 +86,7 @@ export default function Register() {
       <div className="auth-panel">
         <div className="auth-card">
           <h1>注册</h1>
-          <p className="auth-subtitle">创建账号和第一个团队。</p>
+          <p className="auth-subtitle">先创建个人账号，再创建团队或用邀请码申请加入。</p>
           <Form form={form} layout="vertical" onFinish={onFinish}>
             <Form.Item name="apiBaseUrl" label="服务地址" rules={[{required: true}]}>
               <Input placeholder="https://sync.example.com" />
@@ -104,9 +102,6 @@ export default function Register() {
             </Form.Item>
             <Form.Item name="confirmPassword" label="确认密码" rules={[{required: true}]}>
               <Input.Password autoComplete="new-password" />
-            </Form.Item>
-            <Form.Item name="teamName" label="团队名称" rules={[{required: true}]}>
-              <Input />
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={loading}>
               创建账号
