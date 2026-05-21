@@ -10,8 +10,14 @@ const normalizeExtension = (extension: DB.Extension): DB.Extension => {
   };
 };
 
-const getAllExtensions = async () => {
-  const rows = await db('extension').select('*').orderBy('created_at', 'desc');
+const getAllExtensions = async (workspaceId?: string) => {
+  const query = db('extension').select('*');
+  if (workspaceId) {
+    query.where(builder => {
+      builder.whereNull('workspace_id').orWhere('workspace_id', workspaceId);
+    });
+  }
+  const rows = await query.orderBy('created_at', 'desc');
   return rows.map(row => normalizeExtension(row as DB.Extension));
 };
 

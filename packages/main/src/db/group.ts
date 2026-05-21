@@ -1,8 +1,14 @@
 import {db} from '.';
 import type {DB} from '../../../shared/types/db';
 
-const all = async () => {
-  return await db('group').select('*');
+const all = async (workspaceId?: string) => {
+  const query = db('group').select('*');
+  if (workspaceId) {
+    query.where(builder => {
+      builder.whereNull('workspace_id').orWhere('workspace_id', workspaceId);
+    });
+  }
+  return await query;
 };
 
 const getById = async (id: number) => {

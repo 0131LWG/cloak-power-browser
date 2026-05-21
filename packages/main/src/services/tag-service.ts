@@ -2,6 +2,7 @@ import {ipcMain} from 'electron';
 import type {DB} from '../../../shared/types/db';
 import {TagDB} from '../db/tag';
 import {WindowDB} from '../db/window';
+import {getCloudSyncConfig} from '../cloud/config';
 
 export const initTagService = () => {
   ipcMain.handle('tag-create', async (_, tag: DB.Tag) => {
@@ -30,7 +31,8 @@ export const initTagService = () => {
   });
 
   ipcMain.handle('tag-getAll', async () => {
-    return await TagDB.all();
+    const cloudConfig = await getCloudSyncConfig();
+    return await TagDB.all(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
   });
   ipcMain.handle('tag-getById', async (_, id: number) => {
     return await TagDB.getById(id);

@@ -5,7 +5,7 @@ import {GroupDB} from './group';
 import {ProxyDB} from './proxy';
 import {randomUniqueProfileId} from '../../../shared/utils/random';
 
-const all = async () => {
+const all = async (workspaceId?: string) => {
   return await db('window')
     .select(
       'window.id',
@@ -41,10 +41,15 @@ const all = async () => {
     .leftJoin('group', 'window.group_id', '=', 'group.id')
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .where('window.status', '>', 0)
+    .andWhere(builder => {
+      if (workspaceId) {
+        builder.whereNull('window.workspace_id').orWhere('window.workspace_id', workspaceId);
+      }
+    })
     .orderBy('window.created_at', 'desc');
 };
 
-const getOpenedWindows = async () => {
+const getOpenedWindows = async (workspaceId?: string) => {
   return await db('window')
     .select(
       'window.id',
@@ -82,6 +87,11 @@ const getOpenedWindows = async () => {
     .leftJoin('group', 'window.group_id', '=', 'group.id')
     .leftJoin('proxy', 'window.proxy_id', '=', 'proxy.id')
     .where('window.status', '>', 1)
+    .andWhere(builder => {
+      if (workspaceId) {
+        builder.whereNull('window.workspace_id').orWhere('window.workspace_id', workspaceId);
+      }
+    })
     .orderBy('window.created_at', 'desc');
 };
 

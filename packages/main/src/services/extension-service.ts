@@ -437,7 +437,8 @@ export const initExtensionService = () => {
   });
 
   ipcMain.handle('extension-get-all', async () => {
-    return await ExtensionDB.getAllExtensions();
+    const cloudConfig = await getCloudSyncConfig();
+    return await ExtensionDB.getAllExtensions(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
   });
 
   ipcMain.handle('extension-install-from-web-store', async (_, sourceUrl: string) => {

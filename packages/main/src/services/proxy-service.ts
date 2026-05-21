@@ -92,7 +92,8 @@ export const initProxyService = () => {
   });
 
   ipcMain.handle('proxy-getAll', async () => {
-    return await ProxyDB.all();
+    const cloudConfig = await getCloudSyncConfig();
+    return await ProxyDB.all(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
   });
   ipcMain.handle('proxy-batchDelete', async (_, ids: number[]) => {
     const proxies = await Promise.all(ids.map(id => ProxyDB.getById(id)));

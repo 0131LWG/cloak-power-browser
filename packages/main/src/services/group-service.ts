@@ -68,7 +68,8 @@ export const initGroupService = () => {
   });
 
   ipcMain.handle('group-getAll', async () => {
-    return await GroupDB.all();
+    const cloudConfig = await getCloudSyncConfig();
+    return await GroupDB.all(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
   });
   ipcMain.handle('group-getById', async (_, id: number) => {
     return await GroupDB.getById(id);

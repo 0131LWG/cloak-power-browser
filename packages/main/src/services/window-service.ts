@@ -218,11 +218,13 @@ export const initWindowService = () => {
   });
 
   ipcMain.handle('window-getAll', async () => {
-    return await WindowDB.all();
+    const cloudConfig = await getCloudSyncConfig();
+    return await WindowDB.all(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
   });
 
   ipcMain.handle('window-getOpened', async () => {
-    const windows = await WindowDB.getOpenedWindows();
+    const cloudConfig = await getCloudSyncConfig();
+    const windows = await WindowDB.getOpenedWindows(cloudConfig.enabled ? cloudConfig.workspaceId : undefined);
 
     const aliveWindows: typeof windows = [];
     for (const win of windows) {

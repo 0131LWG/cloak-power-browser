@@ -1,13 +1,18 @@
 import {db} from '.';
 import type {DB, SafeAny} from '../../../shared/types/db';
 
-const all = async () => {
+const all = async (workspaceId?: string) => {
   return await db('proxy')
     .leftJoin('window', function () {
       this.on('window.proxy_id', '=', 'proxy.id').andOn('window.status', '>', 0 as SafeAny); // 增加的筛选条件
     })
     .select('proxy.*')
     .count('window.id as usageCount')
+    .where(builder => {
+      if (workspaceId) {
+        builder.whereNull('proxy.workspace_id').orWhere('proxy.workspace_id', workspaceId);
+      }
+    })
     .groupBy('proxy.id')
     .orderBy('proxy.created_at', 'desc');
 };
