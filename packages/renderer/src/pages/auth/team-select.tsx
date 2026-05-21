@@ -146,6 +146,29 @@ export default function TeamSelect() {
     }
   };
 
+  const copyInviteCode = async (inviteCode: string) => {
+    await navigator.clipboard.writeText(inviteCode);
+    messageApi.success('邀请码已复制');
+  };
+
+  const regenerateInviteCode = async (teamId: string) => {
+    const context = await getAuthContext();
+    if (!context) return;
+    setSubmitting(true);
+    try {
+      await fetchCloudJson(context.apiBaseUrl, `/teams/${teamId}/invite-code/regenerate`, {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${context.accessToken}`},
+      });
+      messageApi.success('邀请码已生成');
+      await loadTeams();
+    } catch (error) {
+      messageApi.error((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="auth-shell">
       {contextHolder}
@@ -180,7 +203,24 @@ export default function TeamSelect() {
                       {team.role && <Tag>{team.role}</Tag>}
                     </Space>
                   }
-                  description={team.id}
+                  description={
+                    <Space direction="vertical" size={2}>
+                      <Text type="secondary">{team.id}</Text>
+                      {(team.role === 'owner' || team.role === 'admin') && team.invite_code && (
+                        <Space>
+                          <Text code>{team.invite_code}</Text>
+                          <Button size="small" onClick={() => copyInviteCode(team.invite_code!)}>
+                            复制邀请码
+                          </Button>
+                        </Space>
+                      )}
+                      {(team.role === 'owner' || team.role === 'admin') && !team.invite_code && (
+                        <Button size="small" loading={submitting} onClick={() => regenerateInviteCode(team.id)}>
+                          生成邀请码
+                        </Button>
+                      )}
+                    </Space>
+                  }
                 />
               </List.Item>
             )}
