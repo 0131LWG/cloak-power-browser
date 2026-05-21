@@ -12,6 +12,9 @@ import Logs from '../pages/logs';
 import Start from '../pages/start';
 import Api from '../pages/api';
 import Extensions from '../pages/extensions';
+import Login from '../pages/auth/login';
+import Register from '../pages/auth/register';
+import TeamSelect from '../pages/auth/team-select';
 interface RouteOption {
   path: string;
   name?: string;
@@ -84,6 +87,21 @@ export const useRoutes = () => {
         name: t('menu_api'),
         icon: <Icon icon="ant-design:api-outlined" />,
         component: Api,
+      },
+      {
+        path: '/auth/login',
+        component: Login,
+        invisible: true,
+      },
+      {
+        path: '/auth/register',
+        component: Register,
+        invisible: true,
+      },
+      {
+        path: '/auth/team-select',
+        component: TeamSelect,
+        invisible: true,
       },
       {
         path: '/start',

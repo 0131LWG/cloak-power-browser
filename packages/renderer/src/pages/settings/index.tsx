@@ -1,8 +1,10 @@
-import {Button, Card, Divider, Form, Input, Select, Space, Switch, message} from 'antd';
+import {Button, Card, Divider, Form, Input, Space, Switch, Typography} from 'antd';
 import {CommonBridge, SyncBridge} from '#preload';
 import {useEffect, useState} from 'react';
 import type {SettingOptions} from '../../../../shared/types/common';
 import {useTranslation} from 'react-i18next';
+import {useNavigate} from 'react-router-dom';
+import {clearCloudSession} from '/@/utils/cloud-auth';
 
 type FieldType = {
   profileCachePath: string;
@@ -13,26 +15,9 @@ type FieldType = {
   cloudSync?: SettingOptions['cloudSync'];
 };
 
-type TeamOption = {
-  label: string;
-  value: string;
-};
+type SettingsFormValues = SettingOptions;
 
-type SettingsFormValues = SettingOptions & {
-  cloudLoginEmail?: string;
-  cloudLoginPassword?: string;
-  cloudRegisterTeamName?: string;
-};
-
-const toPersistedSettings = (values: SettingsFormValues): SettingOptions => {
-  const {
-    cloudLoginEmail: _cloudLoginEmail,
-    cloudLoginPassword: _cloudLoginPassword,
-    cloudRegisterTeamName: _cloudRegisterTeamName,
-    ...settings
-  } = values;
-  return settings;
-};
+const {Text} = Typography;
 
 const Settings = () => {
   const [formValue, setFormValue] = useState<SettingOptions>({
@@ -42,11 +27,9 @@ const Settings = () => {
     chromiumBinPath: '',
     automationConnect: false,
   });
-  const [teamOptions, setTeamOptions] = useState<TeamOption[]>([]);
-  const [cloudLoading, setCloudLoading] = useState(false);
-  const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm();
   const {t} = useTranslation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchSettings();
@@ -56,13 +39,10 @@ const Settings = () => {
     const settings = await CommonBridge.getSettings();
     setFormValue(settings);
     form.setFieldsValue(settings);
-    if (settings.cloudSync?.apiBaseUrl && settings.cloudSync?.accessToken) {
-      fetchTeams(settings.cloudSync.apiBaseUrl, settings.cloudSync.accessToken).catch(() => undefined);
-    }
   };
 
   const handleSave = async (values: SettingsFormValues) => {
-    await CommonBridge.saveSettings(toPersistedSettings(values));
+    await CommonBridge.saveSettings(values);
     await SyncBridge?.refreshCloudSyncConfig?.();
   };
 
@@ -80,85 +60,12 @@ const Settings = () => {
   };
 
   const handleFormValueChange = (changed: SettingsFormValues) => {
-    const newFormValue = toPersistedSettings({
+    const newFormValue = {
       ...formValue,
       ...changed,
-    });
+    };
     setFormValue(newFormValue);
     handleSave(newFormValue);
-  };
-
-  const fetchTeams = async (apiBaseUrl: string, accessToken: string) => {
-    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, '')}/teams`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    const result = await response.json();
-    if (!response.ok || !result.success) {
-      throw new Error(result.message || 'Failed to fetch teams');
-    }
-    const options = (result.data || []).map((team: {id: string; name: string; role?: string}) => ({
-      label: `${team.name}${team.role ? ` (${team.role})` : ''}`,
-      value: team.id,
-    }));
-    setTeamOptions(options);
-    return options;
-  };
-
-  const handleCloudAuth = async (mode: 'login' | 'register') => {
-    const values = form.getFieldsValue(true);
-    const apiBaseUrl = values.cloudSync?.apiBaseUrl?.replace(/\/+$/, '');
-    const email = values.cloudLoginEmail;
-    const password = values.cloudLoginPassword;
-    const teamName = values.cloudRegisterTeamName;
-
-    if (!apiBaseUrl || !email || !password) {
-      messageApi.warning('Cloud URL, email and password are required');
-      return;
-    }
-
-    setCloudLoading(true);
-    try {
-      const response = await fetch(`${apiBaseUrl}/auth/${mode}`, {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({
-          email,
-          password,
-          name: email,
-          team_name: teamName,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || 'Cloud auth failed');
-      }
-
-      const teams = await fetchTeams(apiBaseUrl, result.access_token);
-      const workspaceId = result.team?.id || teams[0]?.value || values.cloudSync?.workspaceId || '';
-      const nextSettings = toPersistedSettings({
-        ...formValue,
-        ...values,
-        cloudSync: {
-          ...(formValue.cloudSync || {}),
-          ...(values.cloudSync || {}),
-          enabled: true,
-          apiBaseUrl,
-          accessToken: result.access_token,
-          workspaceId,
-          userId: result.user?.id || '',
-        },
-      });
-      setFormValue(nextSettings);
-      form.setFieldsValue(nextSettings);
-      await handleSave(nextSettings);
-      messageApi.success(mode === 'login' ? 'Cloud login succeeded' : 'Cloud account created');
-    } catch (error) {
-      messageApi.error((error as Error).message);
-    } finally {
-      setCloudLoading(false);
-    }
   };
 
   // type FieldType = SettingOptions;
@@ -169,7 +76,6 @@ const Settings = () => {
         className="content-card p-6"
         bordered={false}
       >
-        {contextHolder}
         <Form
           name="settingsForm"
           className="w-2/3"
@@ -249,6 +155,12 @@ const Settings = () => {
               <Switch value={formValue.automationConnect} />
           </Form.Item> */}
           <Divider>Cloud Sync</Divider>
+          <Form.Item label="Account">
+            <Space direction="vertical" size={2}>
+              <Text>当前用户：{formValue.cloudSync?.userId || '-'}</Text>
+              <Text>当前团队：{formValue.cloudSync?.workspaceId || '-'}</Text>
+            </Space>
+          </Form.Item>
           <Form.Item
             label="Enable"
             name={['cloudSync', 'enabled']}
@@ -262,57 +174,23 @@ const Settings = () => {
           >
             <Input placeholder="http://your-server:8787" />
           </Form.Item>
-          <Form.Item
-            label="Email"
-            name="cloudLoginEmail"
-          >
-            <Input placeholder="name@example.com" />
-          </Form.Item>
-          <Form.Item
-            label="Password"
-            name="cloudLoginPassword"
-          >
-            <Input.Password placeholder="password" />
-          </Form.Item>
-          <Form.Item
-            label="New Team"
-            name="cloudRegisterTeamName"
-          >
-            <Input placeholder="Only needed when registering" />
-          </Form.Item>
-          <Form.Item label="Account">
+          <Form.Item label="Session">
             <Space>
               <Button
                 type="primary"
-                loading={cloudLoading}
-                onClick={() => handleCloudAuth('login')}
+                onClick={() => navigate('/auth/team-select')}
               >
-                Login
+                切换团队
               </Button>
               <Button
-                loading={cloudLoading}
-                onClick={() => handleCloudAuth('register')}
+                danger
+                onClick={() => {
+                  clearCloudSession().then(() => navigate('/auth/login', {replace: true}));
+                }}
               >
-                Register
+                退出登录
               </Button>
             </Space>
-          </Form.Item>
-          <Form.Item
-            label="Team"
-            name={['cloudSync', 'workspaceId']}
-          >
-            <Select
-              options={teamOptions}
-              placeholder="Login first, then choose a team"
-              onFocus={() => {
-                const values = form.getFieldsValue(true);
-                if (values.cloudSync?.apiBaseUrl && values.cloudSync?.accessToken) {
-                  fetchTeams(values.cloudSync.apiBaseUrl, values.cloudSync.accessToken).catch(error =>
-                    messageApi.error((error as Error).message),
-                  );
-                }
-              }}
-            />
           </Form.Item>
           <Form.Item
             label="Device Name"

@@ -1,4 +1,4 @@
-import {Route, Routes, useLocation} from 'react-router-dom';
+import {Route, Routes, useLocation, useNavigate} from 'react-router-dom';
 import Navigation from './components/navigation';
 
 import dayjs from 'dayjs';
@@ -12,6 +12,7 @@ import {useEffect, useState} from 'react';
 import {CommonBridge} from '#preload';
 import {MESSAGE_CONFIG} from './constants';
 import type {BridgeMessage} from '../../shared/types/common';
+import {getSavedSettings} from './utils/cloud-auth';
 
 const {Title} = Typography;
 
@@ -23,13 +24,18 @@ const App = () => {
   const routes = useRoutes();
   const routesMap = useRoutesMap();
   const [isVisible, setIsVisible] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [messageApi, contextHolder] = message.useMessage(MESSAGE_CONFIG);
+  const navigate = useNavigate();
 
   useEffect(() => {
     setTimeout(() => setIsVisible(true), 100); // 延迟显示组件
   }, []);
 
   const location = useLocation();
+  const isAuthRoute = location.pathname.startsWith('/auth/');
+  const isTeamSelectRoute = location.pathname === '/auth/team-select';
+  const isChromeStartRoute = location.pathname === '/start';
 
   useEffect(() => {
     const handleMessaged = (_: Electron.IpcRendererEvent, msg: BridgeMessage) => {
@@ -48,6 +54,40 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (isChromeStartRoute) {
+      setAuthReady(true);
+      return;
+    }
+
+    getSavedSettings()
+      .then(settings => {
+        const hasToken = Boolean(settings.cloudSync?.accessToken);
+        const hasTeam = Boolean(settings.cloudSync?.workspaceId);
+
+        if (!hasToken && !isAuthRoute) {
+          navigate('/auth/login', {replace: true});
+          return;
+        }
+
+        if (hasToken && !hasTeam && !isAuthRoute) {
+          navigate('/auth/team-select', {replace: true});
+          return;
+        }
+
+        if (hasToken && hasTeam && isAuthRoute && !isTeamSelectRoute) {
+          navigate('/', {replace: true});
+        }
+      })
+      .finally(() => setAuthReady(true));
+  }, [location.pathname]);
+
+  const showAppShell = !isChromeStartRoute && !isAuthRoute;
+
+  if (!authReady) {
+    return null;
+  }
+
   return (
     <Layout className={`h-full fade-in ${isVisible ? 'visible' : ''}`}>
       {contextHolder}
@@ -55,9 +95,9 @@ const App = () => {
         spinning={loading}
         rootClassName={loading ? 'fullscreen-spin-wrapper visible' : ''}
       /> */}
-      {location.pathname !== '/start' && <Header></Header>}
+      {showAppShell && <Header></Header>}
       <Layout>
-        {location.pathname !== '/start' && (
+        {showAppShell && (
           <Sider
             width={164}
             className="sider"
@@ -66,13 +106,15 @@ const App = () => {
           </Sider>
         )}
 
-        <Content className="content">
-          <Title
-            className="mt-0"
-            level={2}
-          >
-            {routesMap[location.pathname]?.name}
-          </Title>
+        <Content className={showAppShell ? 'content' : 'h-full'}>
+          {showAppShell && (
+            <Title
+              className="mt-0"
+              level={2}
+            >
+              {routesMap[location.pathname]?.name}
+            </Title>
+          )}
           <Routes>
             {routes.map(route => {
               return (

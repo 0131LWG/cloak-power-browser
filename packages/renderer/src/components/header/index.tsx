@@ -12,6 +12,7 @@ import logo from '../../../assets/logo.png';
 import {Icon} from '@iconify/react';
 import {useNavigate} from 'react-router-dom';
 import {useTranslation} from 'react-i18next';
+import {clearCloudSession} from '/@/utils/cloud-auth';
 
 const {Header: AntdHeader} = Layout;
 
@@ -36,6 +37,10 @@ export default function Header() {
       key: 'settings',
     },
     {
+      label: '切换团队',
+      key: 'team-select',
+    },
+    {
       label: t('header_language'),
       key: 'language',
       children: [
@@ -55,13 +60,13 @@ export default function Header() {
         },
       ],
     },
-    // {
-    //   type: 'divider',
-    // },
-    // {
-    //   label: t('header_sign_out'),
-    //   key: 'signout',
-    // },
+    {
+      type: 'divider',
+    },
+    {
+      label: t('header_sign_out'),
+      key: 'signout',
+    },
   ];
 
   const appControl = (action: 'close' | 'minimize' | 'maximize') => {
@@ -71,9 +76,12 @@ export default function Header() {
 
   const dropdownAction = (info: MenuInfo) => {
     switch (info.key) {
-      // case 'signout':
-      //   supabase.auth.signOut();
-      //   break;
+      case 'signout':
+        clearCloudSession().then(() => navigate('/auth/login', {replace: true}));
+        break;
+      case 'team-select':
+        navigate('/auth/team-select');
+        break;
       case 'settings':
         navigate('/settings');
         break;
