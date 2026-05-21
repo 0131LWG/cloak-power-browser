@@ -31,6 +31,15 @@ import {
 } from '../cloakbrowser/launcher';
 import {ensureCloakBrowserRuntimeForWindow} from '../cloakbrowser/runtime-manager';
 import {acquireProfileLock, releaseProfileLock} from '../cloud/profile-lock-service';
+import {
+  captureCloudCookiesOnce,
+  downloadCloudProfileData,
+  getProfileDataDir,
+  importCloudCookies,
+  startCloudCookieSync,
+  stopCloudCookieSync,
+  uploadCloudProfileData,
+} from '../cloud/profile-data-sync';
 
 const mutex = new Mutex();
 
@@ -237,6 +246,8 @@ export async function openFingerprintWindow(id: number, headless = false) {
         return null;
       }
     }
+
+    const downloadedProfileData = await downloadCloudProfileData(windowData, windowDataDir);
 
     // 确保目录有正确的权限
     const isMac = process.platform === 'darwin';
@@ -460,6 +471,8 @@ export async function openFingerprintWindow(id: number, headless = false) {
               }
             : {}),
         });
+        await importCloudCookies(chromePort, downloadedProfileData?.cookies);
+        startCloudCookieSync(windowData, chromePort);
         windowStarted = true;
         return {
           ...data,
@@ -592,6 +605,7 @@ export async function resetWindowStatus(id: number) {
 export async function closeFingerprintWindow(id: number, force = false) {
   const window = await WindowDB.getById(id);
   const port = window.port;
+  stopCloudCookieSync(id);
   if (force && port) {
     try {
       const browserURL = `http://${HOST}:${port}`;
@@ -601,11 +615,13 @@ export async function closeFingerprintWindow(id: number, force = false) {
         defaultViewport: null,
       });
       logger.info('close browser', browserURL);
+      await captureCloudCookiesOnce(window, port);
       await browser?.close();
     } catch (error) {
       logger.error(error);
     }
   }
+  await uploadCloudProfileData(window, getProfileDataDir(window));
   await WindowDB.update(id, {...window, status: 1, port: null, pid: null});
   await releaseProfileLock(id);
   const win = getMainWindow();
