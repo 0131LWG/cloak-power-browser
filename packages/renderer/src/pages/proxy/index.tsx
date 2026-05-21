@@ -16,7 +16,7 @@ import _, {debounce} from 'lodash';
 import {useEffect, useState} from 'react';
 import type {MenuInfo} from 'rc-menu/lib/interface';
 import type {DB} from '../../../../shared/types/db';
-import {CommonBridge, ProxyBridge} from '#preload';
+import {CommonBridge, ProxyBridge, SyncBridge} from '#preload';
 import type {SearchProps} from 'antd/es/input';
 import {containsKeyword} from '/@/utils/str';
 import {
@@ -349,10 +349,18 @@ const Proxy = () => {
 
   const fetchProxyData = async () => {
     setLoading(true);
-    const data = await ProxyBridge?.getAll();
-    setProxyData(data);
-    setProxyDataCopy(data);
-    setLoading(false);
+    try {
+      await SyncBridge?.pullCloudSync?.();
+    } catch {
+      // Local proxy list should remain usable when cloud sync is disabled or unavailable.
+    }
+    try {
+      const data = await ProxyBridge?.getAll();
+      setProxyData(data);
+      setProxyDataCopy(data);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onSearch: SearchProps['onSearch'] = (value: string) => {
