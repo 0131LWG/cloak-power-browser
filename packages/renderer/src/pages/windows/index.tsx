@@ -13,6 +13,7 @@ import {
   Col,
   Typography,
   message,
+  Tooltip,
 } from 'antd';
 import type {ColumnsType} from 'antd/es/table';
 import type {MenuInfo} from 'rc-menu/lib/interface';
@@ -36,7 +37,7 @@ import {
   ExportOutlined,
 } from '@ant-design/icons';
 import type {DB} from '../../../../shared/types/db';
-import {CommonBridge, GroupBridge, ProxyBridge, TagBridge, WindowBridge} from '#preload';
+import {CommonBridge, GroupBridge, ProxyBridge, SyncBridge, TagBridge, WindowBridge} from '#preload';
 import type {SearchProps} from 'antd/es/input';
 import {containsKeyword} from '/@/utils/str';
 import {useNavigate} from 'react-router-dom';
@@ -44,6 +45,18 @@ import {MESSAGE_CONFIG, WINDOW_STATUS} from '/@/constants';
 import {useTranslation} from 'react-i18next';
 
 const {Text} = Typography;
+
+interface CloudLockState {
+  lock_id?: string;
+  workspace_id?: string;
+  profile_cloud_id: string;
+  user_id?: string;
+  user_name?: string;
+  device_id?: string;
+  device_name?: string;
+  locked_at?: string;
+  heartbeat_at?: string;
+}
 
 const getWindowNameNumber = (name?: string) => {
   const match = name?.match(/\d+/);
@@ -88,6 +101,8 @@ const Windows = () => {
   const [proxySettingVisible, setProxySettingVisible] = useState(false);
   const [proxies, setProxies] = useState<DB.Proxy[]>([]);
   const [selectedProxy, setSelectedProxy] = useState<number>();
+  const [cloudSyncDeviceId, setCloudSyncDeviceId] = useState('');
+  const [cloudLocks, setCloudLocks] = useState(new Map<string, CloudLockState>());
   const navigate = useNavigate();
 
   const moreActionDropdownItems: MenuProps['items'] = [
@@ -153,6 +168,19 @@ const Windows = () => {
     },
   ];
   const columns: ColumnsType<DB.Window> = useMemo(() => {
+    const getCloudLock = (recorder: DB.Window) =>
+      recorder.cloud_id ? cloudLocks.get(recorder.cloud_id) : undefined;
+    const getLockLabel = (lock?: CloudLockState) => {
+      if (!lock) return '';
+      return `${lock.user_name || lock.user_id || 'Unknown'} / ${
+        lock.device_name || lock.device_id || 'Unknown'
+      }`;
+    };
+    const isLockedByOther = (recorder: DB.Window) => {
+      const lock = getCloudLock(recorder);
+      return Boolean(lock?.device_id && lock.device_id !== cloudSyncDeviceId);
+    };
+
     return [
       {
         title: 'ID',
@@ -182,6 +210,28 @@ const Windows = () => {
         key: 'name',
         sorter: compareWindowNameByNumber,
         sortDirections: ['ascend', 'descend'],
+      },
+      {
+        title: 'Cloud',
+        width: 110,
+        key: 'cloud_lock',
+        render: (_, recorder) => {
+          const lock = getCloudLock(recorder);
+          if (lock?.device_id && lock.device_id !== cloudSyncDeviceId) {
+            return (
+              <Tooltip title={`Opened by ${getLockLabel(lock)}`}>
+                <Tag color="orange">使用中</Tag>
+              </Tooltip>
+            );
+          }
+          if (lock) {
+            return <Tag color="green">本机</Tag>;
+          }
+          if (!recorder.cloud_id) {
+            return <Tag color="default">未同步</Tag>;
+          }
+          return <Tag color="blue">可用</Tag>;
+        },
       },
       {
         title: t('window_column_remark'),
@@ -252,21 +302,32 @@ const Windows = () => {
         width: 120,
         align: 'center',
         render: (_, recorder) => (
-          <Button
-            icon={<ChromeOutlined />}
-            disabled={
-              recorder.status === WINDOW_STATUS.RUNNING ||
-              recorder.status === WINDOW_STATUS.PREPARING
+          <Tooltip
+            title={
+              isLockedByOther(recorder)
+                ? `Opened by ${getLockLabel(getCloudLock(recorder))}`
+                : undefined
             }
-            type="primary"
-            onClick={() => openWindows(recorder.id)}
           >
-            {recorder.status === 1
-              ? t('window_open')
-              : recorder.status === 2
-                ? t('window_running')
-                : t('window_preparing')}
-          </Button>
+            <Button
+              icon={<ChromeOutlined />}
+              disabled={
+                recorder.status === WINDOW_STATUS.RUNNING ||
+                recorder.status === WINDOW_STATUS.PREPARING ||
+                isLockedByOther(recorder)
+              }
+              type="primary"
+              onClick={() => openWindows(recorder.id)}
+            >
+              {isLockedByOther(recorder)
+                ? '使用中'
+                : recorder.status === 1
+                  ? t('window_open')
+                  : recorder.status === 2
+                    ? t('window_running')
+                    : t('window_preparing')}
+            </Button>
+          </Tooltip>
         ),
       },
       {
@@ -288,7 +349,7 @@ const Windows = () => {
         ),
       },
     ];
-  }, [tagMap, i18n.language]);
+  }, [tagMap, i18n.language, cloudLocks, cloudSyncDeviceId]);
 
   const [pageSize, setPageSize] = useState(20);
 
@@ -370,6 +431,33 @@ const Windows = () => {
         };
       }),
     );
+  };
+
+  const fetchCloudLocks = async () => {
+    try {
+      const status = await SyncBridge.getCloudSyncStatus();
+      setCloudSyncDeviceId(status?.deviceId || '');
+      if (!status?.enabled) {
+        setCloudLocks(new Map());
+        return;
+      }
+
+      const result = await SyncBridge.getCloudSyncLocks();
+      const nextLocks = new Map<string, CloudLockState>();
+      result?.data?.forEach((lock: CloudLockState) => {
+        if (lock.profile_cloud_id) {
+          nextLocks.set(lock.profile_cloud_id, lock);
+        }
+      });
+      setCloudLocks(nextLocks);
+    } catch {
+      setCloudLocks(new Map());
+    }
+  };
+
+  const isWindowLockedByOtherDevice = (windowItem: DB.Window) => {
+    const lock = windowItem.cloud_id ? cloudLocks.get(windowItem.cloud_id) : undefined;
+    return Boolean(lock?.device_id && cloudSyncDeviceId && lock.device_id !== cloudSyncDeviceId);
   };
 
   const moreAction = (info: MenuInfo) => {
@@ -454,6 +542,12 @@ const Windows = () => {
     fetchProxies();
     fetchGroupData();
     fetchWindowData();
+    fetchCloudLocks();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(fetchCloudLocks, 10000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -461,6 +555,7 @@ const Windows = () => {
       setRawWindowData(windowData =>
         windowData.map(window => (window.id === id ? {...window, status: 1} : window)),
       );
+      fetchCloudLocks();
     };
 
     const handleWindowOpened = (_: Electron.IpcRendererEvent, id: number) => {
@@ -468,6 +563,7 @@ const Windows = () => {
         setRawWindowData(windowData =>
           windowData.map(window => (window.id === id ? {...window, status: 2} : window)),
         );
+        fetchCloudLocks();
       } else {
         messageApi.error('Failed to open window');
       }
@@ -501,15 +597,26 @@ const Windows = () => {
   const openWindows = async (id?: number) => {
     setLoading(true);
     if (id) {
+      const targetWindow = rawWindowData.find(windowItem => windowItem.id === id);
+      if (targetWindow && isWindowLockedByOtherDevice(targetWindow)) {
+        messageApi.warning('Window is already open on another device');
+        setLoading(false);
+        return;
+      }
       await WindowBridge?.open(id);
       setLoading(false);
     } else {
       for (let index = 0; index < selectedRowKeys.length; index++) {
         const rowKey = selectedRowKeys[index];
+        const targetWindow = rawWindowData.find(windowItem => windowItem.id === rowKey);
+        if (targetWindow && isWindowLockedByOtherDevice(targetWindow)) {
+          continue;
+        }
         await WindowBridge?.open(rowKey);
       }
       setLoading(false);
     }
+    await fetchCloudLocks();
   };
 
   const deleteWindows = () => {

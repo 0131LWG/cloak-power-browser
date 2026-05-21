@@ -71,6 +71,10 @@ export const SyncBridge = {
     return ipcRenderer.invoke('cloud-sync-pull');
   },
 
+  getCloudSyncLocks: () => {
+    return ipcRenderer.invoke('cloud-sync-locks');
+  },
+
   resetCloudSyncCursor: (workspaceId?: string) => {
     return ipcRenderer.invoke('cloud-sync-reset-cursor', workspaceId);
   },

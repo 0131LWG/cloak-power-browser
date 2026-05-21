@@ -9,6 +9,7 @@ import {
   startCloudSyncEngine,
   stopCloudSyncEngine,
 } from '../cloud/sync-engine';
+import type {ProfileLockState} from '../cloud/types';
 
 export const initCloudSyncService = () => {
   startCloudSyncEngine().catch(() => {
@@ -40,6 +41,14 @@ export const initCloudSyncService = () => {
 
   ipcMain.handle('cloud-sync-pull', async () => {
     return await pullSyncEvents();
+  });
+
+  ipcMain.handle('cloud-sync-locks', async () => {
+    const response = await cloudApiClient.request<{success: boolean; data: ProfileLockState[]}>(
+      'get',
+      '/debug/locks',
+    );
+    return response || {success: false, data: []};
   });
 
   ipcMain.handle('cloud-sync-reset-cursor', async (_, workspaceId?: string) => {

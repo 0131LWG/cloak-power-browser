@@ -17,6 +17,13 @@ export interface ProfileLockOwner {
   heartbeat_at?: string;
 }
 
+export interface ProfileLockState extends ProfileLockOwner {
+  lock_id?: string;
+  workspace_id?: string;
+  profile_cloud_id: string;
+  app_instance_id?: string;
+}
+
 export interface ProfileLockResult {
   success: boolean;
   lock_id?: string;
