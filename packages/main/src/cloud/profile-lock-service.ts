@@ -1,4 +1,5 @@
 import {app} from 'electron';
+import axios from 'axios';
 import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
 import type {DB} from '../../../shared/types/db';
@@ -22,10 +23,20 @@ const isCloudLockedWindow = (windowData: DB.Window) => Boolean(windowData.cloud_
 export const acquireProfileLock = async (windowData: DB.Window): Promise<ProfileLockResult> => {
   const config = await cloudApiClient.getConfig();
   if (!config.enabled) {
+    logger.info('Profile lock skipped because cloud sync is disabled', {
+      localWindowId: windowData.id,
+      cloudId: windowData.cloud_id,
+    });
     return {success: true, reason: 'disabled'};
   }
 
   if (!isCloudLockedWindow(windowData)) {
+    logger.warn('Profile lock denied because window has no cloud_id', {
+      localWindowId: windowData.id,
+      profileId: windowData.profile_id,
+      workspaceId: config.workspaceId,
+      deviceId: config.deviceId,
+    });
     return {
       success: false,
       reason: 'missing_cloud_id',
@@ -34,18 +45,65 @@ export const acquireProfileLock = async (windowData: DB.Window): Promise<Profile
   }
 
   const profileCloudId = windowData.cloud_id!;
-  const result = await cloudApiClient.request<ProfileLockResult>(
-    'post',
-    `/profiles/${profileCloudId}/lock`,
-    {
+  const payload = {
       device_id: config.deviceId,
       device_name: config.deviceName,
       user_id: config.userId,
       app_instance_id: `${process.pid}`,
-    },
-  );
+  };
+
+  logger.info('Profile lock acquire requested', {
+    localWindowId: windowData.id,
+    profileId: windowData.profile_id,
+    cloudId: profileCloudId,
+    workspaceId: config.workspaceId,
+    deviceId: config.deviceId,
+    deviceName: config.deviceName,
+    appInstanceId: `${process.pid}`,
+  });
+
+  let result: ProfileLockResult | undefined;
+  try {
+    result = await cloudApiClient.request<ProfileLockResult>(
+      'post',
+      `/profiles/${profileCloudId}/lock`,
+      payload,
+    );
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 409) {
+      const lockedResult = error.response.data as ProfileLockResult;
+      logger.warn('Profile lock acquire rejected by server', {
+        localWindowId: windowData.id,
+        cloudId: profileCloudId,
+        workspaceId: config.workspaceId,
+        deviceId: config.deviceId,
+        lockedBy: lockedResult?.locked_by,
+      });
+      return {
+        success: false,
+        reason: 'locked',
+        message: lockedResult?.message || 'Profile is locked by another device.',
+        locked_by: lockedResult?.locked_by,
+      };
+    }
+    logger.error('Profile lock acquire failed', {
+      localWindowId: windowData.id,
+      cloudId: profileCloudId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      reason: 'network_error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 
   if (!result?.success) {
+    logger.warn('Profile lock acquire returned unsuccessful response', {
+      localWindowId: windowData.id,
+      cloudId: profileCloudId,
+      result,
+    });
     return {
       success: false,
       reason: result?.reason || 'unknown',
@@ -53,6 +111,13 @@ export const acquireProfileLock = async (windowData: DB.Window): Promise<Profile
       locked_by: result?.locked_by,
     };
   }
+
+  logger.info('Profile lock acquired', {
+    localWindowId: windowData.id,
+    cloudId: profileCloudId,
+    lockId: result.lock_id,
+    deviceId: config.deviceId,
+  });
 
   heldLocks.set(windowData.id!, {
     profileCloudId,

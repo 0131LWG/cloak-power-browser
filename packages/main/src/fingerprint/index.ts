@@ -148,6 +148,13 @@ export async function openFingerprintWindow(id: number, headless = false) {
   let windowStarted = false;
   try {
     const windowData = await WindowDB.getById(id);
+    logger.info('Window open requested', {
+      localWindowId: id,
+      profileId: windowData?.profile_id,
+      cloudId: windowData?.cloud_id,
+      status: windowData?.status,
+      port: windowData?.port,
+    });
 
     const profileLock = await acquireProfileLock(windowData);
     if (!profileLock.success) {
