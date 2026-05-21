@@ -20,10 +20,17 @@ import {getSettings} from '../utils/get-settings';
 import {randomUUID} from 'crypto';
 import {getCloudSyncConfig} from '../cloud/config';
 import {enqueueSyncOutbox} from '../cloud/sync-outbox';
+import {flushSyncOutbox} from '../cloud/sync-engine';
 import {GroupDB} from '../db/group';
 import {ProxyDB} from '../db/proxy';
 import {randomUniqueProfileId} from '../../../shared/utils/random';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
+
+const flushWindowSyncSoon = () => {
+  flushSyncOutbox().catch(() => {
+    // The scheduled sync loop will retry.
+  });
+};
 
 const isPathInside = (root: string, target: string) => {
   const relativePath = relative(root, target);
@@ -227,6 +234,7 @@ export const initWindowService = () => {
       cloudId: windowData?.cloud_id,
       data: windowData,
     });
+    flushWindowSyncSoon();
     return result;
   });
   ipcMain.handle('window-batchClear', async (_, ids: number[]) => {
@@ -234,8 +242,21 @@ export const initWindowService = () => {
     return await WindowDB.batchClear(ids);
   });
   ipcMain.handle('window-batchDelete', async (_, ids: number[]) => {
+    const windows = await Promise.all(ids.map(id => WindowDB.getById(id)));
     await ExtensionDB.deleteWindowReleted(ids);
-    return await WindowDB.batchRemove(ids);
+    const result = await WindowDB.batchRemove(ids);
+    if (result.success) {
+      for (const windowData of windows) {
+        if (!windowData) continue;
+        await enqueueSyncOutbox('window', 'delete', {
+          localId: windowData.id,
+          cloudId: windowData.cloud_id,
+          data: windowData,
+        });
+      }
+      flushWindowSyncSoon();
+    }
+    return result;
   });
   ipcMain.handle('window-clear-cache', async (_, ids: number[]) => {
     return await clearWindowCache(ids);

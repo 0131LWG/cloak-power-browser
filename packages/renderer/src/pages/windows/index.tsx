@@ -414,6 +414,7 @@ const Windows = () => {
   const fetchWindowData = async () => {
     setLoading(true);
     try {
+      await SyncBridge?.pullCloudSync?.();
       const data = await WindowBridge?.getAll();
       setRawWindowData(data);
     } catch (error) {
