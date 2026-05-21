@@ -375,7 +375,7 @@ const WindowEditForm = ({
       >
         <Select
           allowClear
-          placeholder="默认 macOS"
+          placeholder="默认使用创建窗口的设备平台"
           options={platformOptions}
         />
       </Form.Item>

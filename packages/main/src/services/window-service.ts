@@ -22,6 +22,7 @@ import {getCloudSyncConfig} from '../cloud/config';
 import {enqueueSyncOutbox} from '../cloud/sync-outbox';
 import {GroupDB} from '../db/group';
 import {ProxyDB} from '../db/proxy';
+import {randomUniqueProfileId} from '../../../shared/utils/random';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 
 const isPathInside = (root: string, target: string) => {
@@ -135,8 +136,30 @@ export const initWindowService = () => {
       const data = txtToJSON(fileContent);
       fileData = data.filter(f => f.id);
     }
-    console.log(fileData);
+    fileData = fileData.map(row => withStableImportFingerprint(row));
     const result = await WindowDB.externalImport(fileData);
+    const cloudConfig = await getCloudSyncConfig();
+    if (cloudConfig.enabled && result.data?.length) {
+      for (const id of result.data) {
+        const importedWindow = await WindowDB.getById(id);
+        if (!importedWindow) continue;
+        const cloudId = importedWindow.cloud_id || randomUUID();
+        await WindowDB.update(id, {
+          ...importedWindow,
+          cloud_id: cloudId,
+          workspace_id: importedWindow.workspace_id || cloudConfig.workspaceId,
+          sync_dirty: true,
+          updated_by_device_id: cloudConfig.deviceId,
+        });
+        const latestWindow = await WindowDB.getById(id);
+        const syncPayload = await withWindowRelationCloudIds(latestWindow || importedWindow);
+        await enqueueSyncOutbox('window', 'create', {
+          localId: id,
+          cloudId,
+          data: syncPayload,
+        });
+      }
+    }
     return result;
   });
 
@@ -160,6 +183,7 @@ export const initWindowService = () => {
           updated_by_device_id: cloudConfig.deviceId,
         }
       : window;
+    windowPayload.fingerprint = buildStableWindowFingerprint(windowPayload, fingerprint);
     const result = await WindowDB.create(windowPayload, fingerprint);
     if (result.success && result.data?.id) {
       const syncPayload = await withWindowRelationCloudIds(result.data);
@@ -343,4 +367,78 @@ export const randomFingerprint = () => {
     audio: randomInt(),
   };
   return result;
+};
+
+const buildStableWindowFingerprint = (windowData: DB.Window, fallbackFingerprint?: SafeAny) => {
+  const fingerprint = {
+    ...parseWindowFingerprint(fallbackFingerprint),
+    ...parseWindowFingerprint(windowData.fingerprint),
+  };
+
+  if (!fingerprint.ua && !windowData.ua) {
+    fingerprint.ua = randomFingerprint().ua;
+  }
+  if (!fingerprint.ua && windowData.ua) {
+    fingerprint.ua = windowData.ua;
+  }
+  if (!fingerprint.platform) {
+    fingerprint.platform = getCurrentFingerprintPlatform();
+  }
+  if (!fingerprint.fingerprintSeed && windowData.profile_id) {
+    fingerprint.fingerprintSeed = stableFingerprintSeed(windowData.profile_id);
+  }
+
+  return fingerprint;
+};
+
+const parseWindowFingerprint = (fingerprint?: SafeAny) => {
+  if (!fingerprint || fingerprint === '{}') {
+    return {};
+  }
+  if (typeof fingerprint !== 'string') {
+    return fingerprint;
+  }
+  try {
+    return JSON.parse(fingerprint);
+  } catch {
+    return {};
+  }
+};
+
+const getCurrentFingerprintPlatform = () => {
+  if (process.platform === 'darwin') return 'macos';
+  if (process.platform === 'win32') return 'windows';
+  return 'linux';
+};
+
+const stableFingerprintSeed = (profileId: string) => {
+  let hash = 0;
+  for (let index = 0; index < profileId.length; index++) {
+    hash = (hash * 31 + profileId.charCodeAt(index)) >>> 0;
+  }
+  return String(10000 + (hash % 90000));
+};
+
+const withStableImportFingerprint = (row: IWindowTemplate) => {
+  const nextRow = {...row} as IWindowTemplate & Record<string, unknown>;
+  const profileId = String(
+    nextRow.id || nextRow.profile_id || nextRow.profileId || nextRow['Profile ID'] || randomUniqueProfileId(),
+  );
+  const existingUa = nextRow.ua || nextRow.user_agent || nextRow['User Agent'] || nextRow.UA;
+  const existingSeed =
+    nextRow.fingerprint_seed || nextRow.fingerprintSeed || nextRow.seed || nextRow.Seed || nextRow['指纹种子'];
+  const existingPlatform = nextRow.platform || nextRow.Platform || nextRow['指纹平台'];
+
+  nextRow.id = profileId;
+  if (!existingUa) {
+    nextRow.ua = randomFingerprint().ua;
+  }
+  if (!existingSeed) {
+    nextRow.fingerprint_seed = stableFingerprintSeed(profileId);
+  }
+  if (!existingPlatform) {
+    nextRow.platform = getCurrentFingerprintPlatform();
+  }
+
+  return nextRow;
 };
