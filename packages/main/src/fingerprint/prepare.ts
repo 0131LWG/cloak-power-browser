@@ -80,7 +80,12 @@ export async function createShortcutWithIcon(exePath: string, args: string[], ic
   }
 }
 
-const getRealIP = async (proxy: DB.Proxy) => {
+const getRealIP = async (proxy?: DB.Proxy) => {
+  if (!proxy?.proxy || !proxy.proxy_type) {
+    logger.warn('| Prepare | getRealIP | proxy is missing or incomplete');
+    return '';
+  }
+
   let agent:
     | SocksProxyAgent
     | HttpProxyAgent<`http://${string}:${string}`>
@@ -131,7 +136,12 @@ const getRealIP = async (proxy: DB.Proxy) => {
   }
 };
 
-export const getProxyInfo = async (proxy: DB.Proxy, proxyUrl?: string) => {
+export const getProxyInfo = async (proxy?: DB.Proxy, proxyUrl?: string) => {
+  if (!proxyUrl && (!proxy?.proxy || !proxy.proxy_type)) {
+    logger.warn('| Prepare | getProxyInfo | proxy is missing or incomplete');
+    return undefined;
+  }
+
   let attempts = 0;
   const maxAttempts = 3;
   const realIP = proxyUrl ? await getRealIPFromUrl(proxyUrl) : await getRealIP(proxy);
@@ -140,7 +150,7 @@ export const getProxyInfo = async (proxy: DB.Proxy, proxyUrl?: string) => {
   };
   while (attempts < maxAttempts) {
     try {
-      const res = await api.get(getOrigin() + `/ip/${proxy.ip_checker || 'ip2location'}`, {
+      const res = await api.get(getOrigin() + `/ip/${proxy?.ip_checker || 'ip2location'}`, {
         params: params,
         timeout: 2000,
       });
@@ -245,11 +255,18 @@ export function getAgent(proxy: DB.Proxy) {
   };
 }
 
-export async function testProxy(proxy: DB.Proxy) {
+export async function testProxy(proxy?: DB.Proxy) {
   const result: {
     ipInfo?: {[key: string]: string};
     connectivity: {name: string; elapsedTime: number; status: string; reason?: string}[];
   } = {connectivity: []};
+
+  if (!proxy?.proxy || !proxy.proxy_type) {
+    return {
+      ...result,
+      error: 'Proxy is missing or incomplete',
+    };
+  }
 
   let agent:
     | SocksProxyAgent

@@ -5,6 +5,13 @@ import {testProxy} from '../fingerprint/prepare';
 import {randomUUID} from 'crypto';
 import {getCloudSyncConfig} from '../cloud/config';
 import {enqueueSyncOutbox} from '../cloud/sync-outbox';
+import {flushSyncOutbox} from '../cloud/sync-engine';
+
+const flushProxySyncSoon = () => {
+  flushSyncOutbox().catch(() => {
+    // The scheduled sync loop will retry.
+  });
+};
 
 export const initProxyService = () => {
   ipcMain.handle('proxy-create', async (_, proxy: DB.Proxy) => {
@@ -24,6 +31,7 @@ export const initProxyService = () => {
       cloudId: payload.cloud_id,
       data: payload,
     });
+    flushProxySyncSoon();
     return result;
   });
 
@@ -45,14 +53,19 @@ export const initProxyService = () => {
         data: proxy,
       });
     }
+    flushProxySyncSoon();
     return result;
   });
 
   ipcMain.handle('proxy-update', async (_, id: number, proxy: DB.Proxy) => {
     const cloudConfig = await getCloudSyncConfig();
+    const existing = await ProxyDB.getById(id);
     const payload = cloudConfig.enabled
       ? {
+          ...existing,
           ...proxy,
+          cloud_id: proxy.cloud_id || existing?.cloud_id || randomUUID(),
+          workspace_id: proxy.workspace_id || existing?.workspace_id || cloudConfig.workspaceId,
           sync_dirty: true,
           updated_by_device_id: cloudConfig.deviceId,
         }
@@ -63,6 +76,7 @@ export const initProxyService = () => {
       cloudId: payload.cloud_id,
       data: payload,
     });
+    flushProxySyncSoon();
     return result;
   });
 
@@ -73,6 +87,7 @@ export const initProxyService = () => {
       cloudId: proxy.cloud_id,
       data: proxy,
     });
+    flushProxySyncSoon();
     return result;
   });
 
@@ -80,7 +95,20 @@ export const initProxyService = () => {
     return await ProxyDB.all();
   });
   ipcMain.handle('proxy-batchDelete', async (_, ids: number[]) => {
-    return await ProxyDB.batchDelete(ids);
+    const proxies = await Promise.all(ids.map(id => ProxyDB.getById(id)));
+    const result = await ProxyDB.batchDelete(ids);
+    if (result.success) {
+      for (const proxy of proxies) {
+        if (!proxy) continue;
+        await enqueueSyncOutbox('proxy', 'delete', {
+          localId: proxy.id,
+          cloudId: proxy.cloud_id,
+          data: proxy,
+        });
+      }
+      flushProxySyncSoon();
+    }
+    return result;
   });
 
   ipcMain.handle('proxy-getById', async (_, id: number) => {
@@ -90,6 +118,12 @@ export const initProxyService = () => {
   ipcMain.handle('proxy-test', async (_, testParams: number | DB.Proxy) => {
     if (typeof testParams === 'number') {
       const proxy = await ProxyDB.getById(testParams);
+      if (!proxy) {
+        return {
+          connectivity: [],
+          error: `Proxy ${testParams} not found`,
+        };
+      }
       return await testProxy(proxy);
     } else {
       return await testProxy(testParams);

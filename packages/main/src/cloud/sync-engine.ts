@@ -280,6 +280,7 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
         'last_synced_at',
         'updated_by_device_id',
       ]);
+      await repairWindowProxyReferences(cloudId);
       return;
     case 'window':
       await applyWindowSyncEvent(cloudId, event.operation, payload);
@@ -319,6 +320,8 @@ const applyWindowSyncEvent = async (
 
   const normalizedPayload = {
     ...payload,
+    ...(groupCloudId ? {group_cloud_id: groupCloudId} : {}),
+    ...(proxyCloudId ? {proxy_cloud_id: proxyCloudId} : {}),
     ...(groupCloudId ? {group_id: groupId} : {}),
     ...(proxyCloudId ? {proxy_id: proxyId} : {}),
   };
@@ -326,7 +329,9 @@ const applyWindowSyncEvent = async (
   await applyEntityUpsertOrDelete('window', cloudId, operation, normalizedPayload, [
         'profile_id',
         'name',
+        'group_cloud_id',
         'group_id',
+        'proxy_cloud_id',
         'proxy_id',
         'tags',
         'remark',
@@ -389,6 +394,28 @@ const sanitizePayload = (payload: Record<string, unknown>, allowedFields: string
 const findLocalIdByCloudId = async (tableName: string, cloudId: string) => {
   const row = await db(tableName).select('id').where({cloud_id: cloudId}).first();
   return row?.id ?? null;
+};
+
+const repairWindowProxyReferences = async (proxyCloudId: string) => {
+  const proxyId = await findLocalIdByCloudId('proxy', proxyCloudId);
+  if (!proxyId) {
+    return;
+  }
+
+  const hasProxyCloudIdColumn = await db.schema.hasColumn('window', 'proxy_cloud_id');
+  if (!hasProxyCloudIdColumn) {
+    return;
+  }
+
+  await db('window')
+    .where({proxy_cloud_id: proxyCloudId})
+    .where(builder => {
+      builder.whereNull('proxy_id').orWhere('proxy_id', 0);
+    })
+    .update({
+      proxy_id: proxyId,
+      updated_at: db.fn.now(),
+    });
 };
 
 const toNullableString = (value: unknown) => {

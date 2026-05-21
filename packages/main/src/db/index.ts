@@ -97,6 +97,8 @@ const ensureCloudSyncColumns = async () => {
   await ensureColumn('window', 'browser_runtime_overrides', table =>
     table.json('browser_runtime_overrides').nullable(),
   );
+  await ensureColumn('window', 'group_cloud_id', table => table.string('group_cloud_id').nullable());
+  await ensureColumn('window', 'proxy_cloud_id', table => table.string('proxy_cloud_id').nullable());
 
   const hasWindowExtension = await db.schema.hasTable('window_extension');
   if (hasWindowExtension) {
