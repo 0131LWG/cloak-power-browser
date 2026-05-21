@@ -176,6 +176,11 @@ const Windows = () => {
         lock.device_name || lock.device_id || 'Unknown'
       }`;
     };
+    const formatCloudLockTime = (lock?: CloudLockState) => {
+      const time = lock?.heartbeat_at || lock?.locked_at;
+      if (!time) return '';
+      return new Date(time).toLocaleString();
+    };
     const isLockedByOther = (recorder: DB.Window) => {
       const lock = getCloudLock(recorder);
       return Boolean(lock?.device_id && lock.device_id !== cloudSyncDeviceId);
@@ -212,7 +217,7 @@ const Windows = () => {
         sortDirections: ['ascend', 'descend'],
       },
       {
-        title: 'Cloud',
+        title: '云状态',
         width: 110,
         key: 'cloud_lock',
         render: (_, recorder) => {
@@ -274,8 +279,22 @@ const Windows = () => {
         title: t('window_column_last_open'),
         dataIndex: 'opened_at',
         key: 'opened_at',
-        width: 150,
-        render: value => {
+        width: 180,
+        render: (value, recorder) => {
+          const lock = getCloudLock(recorder);
+          if (isLockedByOther(recorder)) {
+            return (
+              <Tooltip title={`Opened by ${getLockLabel(lock)}`}>
+                <Space direction="vertical" size={0}>
+                  <Tag color="orange">远端打开中</Tag>
+                  {formatCloudLockTime(lock) && (
+                    <Text type="secondary">{formatCloudLockTime(lock)}</Text>
+                  )}
+                </Space>
+              </Tooltip>
+            );
+          }
+
           if (!value) return '';
           const utcDate = new Date(value + 'Z');
 
