@@ -148,6 +148,26 @@ export async function openFingerprintWindow(id: number, headless = false) {
   let windowStarted = false;
   try {
     const windowData = await WindowDB.getById(id);
+
+    const profileLock = await acquireProfileLock(windowData);
+    if (!profileLock.success) {
+      const lockedBy = profileLock.locked_by
+        ? `${profileLock.locked_by.user_name || profileLock.locked_by.user_id || 'unknown user'} / ${
+            profileLock.locked_by.device_name || profileLock.locked_by.device_id || 'unknown device'
+          }`
+        : 'another device';
+      const message =
+        profileLock.reason === 'locked'
+          ? `Profile is already open on ${lockedBy}.`
+          : profileLock.message || 'Failed to acquire profile lock.';
+      bridgeMessageToUI({
+        type: 'warning',
+        text: message,
+      });
+      logger.warn(`Profile lock denied for window ${id}: ${message}`);
+      return null;
+    }
+    profileLockAcquired = profileLock.reason !== 'disabled';
     
     // 检查窗口是否已经打开
     if (windowData.status === 2 && windowData.port) {
@@ -185,26 +205,6 @@ export async function openFingerprintWindow(id: number, headless = false) {
         });
       }
     }
-
-    const profileLock = await acquireProfileLock(windowData);
-    if (!profileLock.success) {
-      const lockedBy = profileLock.locked_by
-        ? `${profileLock.locked_by.user_name || profileLock.locked_by.user_id || 'unknown user'} / ${
-            profileLock.locked_by.device_name || profileLock.locked_by.device_id || 'unknown device'
-          }`
-        : 'another device';
-      const message =
-        profileLock.reason === 'locked'
-          ? `Profile is already open on ${lockedBy}.`
-          : profileLock.message || 'Failed to acquire profile lock.';
-      bridgeMessageToUI({
-        type: 'warning',
-        text: message,
-      });
-      logger.warn(`Profile lock denied for window ${id}: ${message}`);
-      return null;
-    }
-    profileLockAcquired = profileLock.reason !== 'disabled' && profileLock.reason !== 'missing_cloud_id';
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
     const proxyData = await ProxyDB.getById(windowData.proxy_id);
