@@ -373,10 +373,21 @@ export const initWindowService = () => {
 };
 
 export const randomFingerprint = () => {
-  const uaPath = path.join(
-    import.meta.env.MODE === 'development' ? 'assets' : 'resources/app/assets',
-    'ua.txt',
-  );
+  const uaPathCandidates = [
+    path.join('assets', 'ua.txt'),
+    path.join(process.cwd(), 'assets', 'ua.txt'),
+    path.join(process.resourcesPath, 'app', 'assets', 'ua.txt'),
+    path.join(process.resourcesPath, 'app.asar', 'assets', 'ua.txt'),
+    // Backward compatibility for accidental filename typo in some packaged builds.
+    path.join(process.resourcesPath, 'app', 'assets', 'uaa.txt'),
+    path.join(process.resourcesPath, 'app.asar', 'assets', 'uaa.txt'),
+  ];
+  const uaPath = uaPathCandidates.find(candidate => existsSync(candidate));
+
+  if (!uaPath) {
+    throw new Error(`UA file not found. Checked paths: ${uaPathCandidates.join(', ')}`);
+  }
+
   const uaFile = readFileSync(uaPath, 'utf-8');
   const uaList = uaFile.split('\n');
   const randomIndex = Math.floor(Math.random() * uaList.length);
