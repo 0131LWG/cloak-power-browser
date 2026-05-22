@@ -286,26 +286,56 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
       await applyWindowSyncEvent(cloudId, event.operation, payload);
       return;
     case 'extension':
-      await applyEntityUpsertOrDelete('extension', cloudId, event.operation, payload, [
-        'name',
-        'version',
-        'icon',
-        'description',
-        'source_type',
-        'source_url',
-        'chrome_extension_id',
-        'distribution_mode',
-        'auto_update',
-        'workspace_id',
-        'sync_version',
-        'sync_deleted_at',
-        'last_synced_at',
-        'updated_by_device_id',
-      ]);
+      await applyExtensionSyncEvent(cloudId, event.operation, payload);
       return;
     default:
       return;
   }
+};
+
+const applyExtensionSyncEvent = async (
+  cloudId: string,
+  operation: 'create' | 'update' | 'delete',
+  payload: Record<string, unknown>,
+) => {
+  if (operation === 'delete') {
+    await db('extension').where({cloud_id: cloudId}).delete();
+    return;
+  }
+
+  const existing = await db('extension').where({cloud_id: cloudId}).first();
+  const normalizedPayload: Record<string, unknown> = {
+    ...payload,
+    name: toNullableString(payload.name) || existing?.name || 'Synced extension',
+    distribution_mode: toNullableString(payload.distribution_mode) || existing?.distribution_mode || 'manual',
+  };
+
+  const pathValue = toNullableString(payload.path);
+  if (pathValue) {
+    normalizedPayload.path = pathValue;
+  } else if (!existing) {
+    // Extension files are machine-local. A synced Chrome Web Store record can arrive
+    // before this machine has downloaded the package, but the legacy schema requires path.
+    normalizedPayload.path = '';
+  }
+
+  await applyEntityUpsertOrDelete('extension', cloudId, operation, normalizedPayload, [
+    'name',
+    'version',
+    'path',
+    'icon',
+    'description',
+    'source_type',
+    'source_url',
+    'chrome_extension_id',
+    'distribution_mode',
+    'auto_update',
+    'workspace_id',
+    'sync_version',
+    'sync_deleted_at',
+    'last_synced_at',
+    'updated_by_device_id',
+  ]);
 };
 
 const applyWindowSyncEvent = async (

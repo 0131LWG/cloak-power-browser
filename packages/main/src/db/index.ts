@@ -130,6 +130,21 @@ const ensureCloudSyncColumns = async () => {
   }
 };
 
+const ensureExtensionPathNullable = async () => {
+  const hasExtensionTable = await db.schema.hasTable('extension');
+  if (!hasExtensionTable) {
+    return;
+  }
+
+  try {
+    await db.schema.alterTable('extension', table => {
+      table.string('path').nullable().alter();
+    });
+  } catch (error) {
+    console.warn('Failed to relax extension.path nullable constraint:', error);
+  }
+};
+
 const initializeDatabase = async () => {
   const userDataPath = app.getPath('userData');
 
@@ -145,6 +160,7 @@ const initializeDatabase = async () => {
     // Defensive schema repair before migrations for users stuck in a partially upgraded database.
     await ensureWindowRuntimeColumns();
     await ensureCloudSyncColumns();
+    await ensureExtensionPathNullable();
 
     // 运行迁移
     try {
@@ -159,6 +175,7 @@ const initializeDatabase = async () => {
     // Defensive schema repair after migrations too. This keeps old packaged builds recoverable.
     await ensureWindowRuntimeColumns();
     await ensureCloudSyncColumns();
+    await ensureExtensionPathNullable();
 
     // 初始化窗口状态
     await initWindowStatus();

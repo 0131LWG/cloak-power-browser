@@ -223,6 +223,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
+    const loadableExtensionPaths = extensionData
+      .map(e => e.path)
+      .filter((extensionPath): extensionPath is string => Boolean(extensionPath && existsSync(extensionPath)));
     const proxyData = await ProxyDB.getById(windowData.proxy_id);
     const proxyType = proxyData?.proxy_type?.toLowerCase();
     const settings = getSettings();
@@ -344,7 +347,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
             profileRoot: cachePath,
             runtimeExecutablePath: cloakRuntime?.executablePath,
             startUrl,
-            extensions: extensionData.map(e => e.path),
+            extensions: loadableExtensionPaths,
             windowData,
           }).args
         : settings.useLocalChrome
@@ -379,8 +382,8 @@ export async function openFingerprintWindow(id: number, headless = false) {
         launchParamter.push(`--timezone=${ipInfo.timeZone}`);
         launchParamter.push(`--tz=${ipInfo.timeZone}`);
       }
-      if (extensionData.length > 0 && !useCloakBrowser) {
-        launchParamter.push(`--load-extension=${extensionData.map(e => e.path).join(',')}`);
+      if (loadableExtensionPaths.length > 0 && !useCloakBrowser) {
+        launchParamter.push(`--load-extension=${loadableExtensionPaths.join(',')}`);
       }
       if (headless && !useCloakBrowser) {
         launchParamter.push('--headless=new'); // 使用新版 headless 模式
