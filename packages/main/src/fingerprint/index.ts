@@ -223,9 +223,15 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
-    const loadableExtensionPaths = extensionData
-      .map(e => e.path)
-      .filter((extensionPath): extensionPath is string => Boolean(extensionPath && existsSync(extensionPath)));
+    const extensionPaths = extensionData.map(e => e.path).filter((extensionPath): extensionPath is string => Boolean(extensionPath));
+    const loadableExtensionPaths = extensionPaths.filter(extensionPath => existsSync(extensionPath));
+    const missingExtensionPaths = extensionPaths.filter(extensionPath => !existsSync(extensionPath));
+    if (missingExtensionPaths.length > 0) {
+      logger.warn('Some extension paths do not exist and will be skipped', {
+        windowId: id,
+        missingExtensionPaths,
+      });
+    }
     const proxyData = await ProxyDB.getById(windowData.proxy_id);
     const proxyType = proxyData?.proxy_type?.toLowerCase();
     const settings = getSettings();
@@ -383,7 +389,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
         launchParamter.push(`--tz=${ipInfo.timeZone}`);
       }
       if (loadableExtensionPaths.length > 0 && !useCloakBrowser) {
-        launchParamter.push(`--load-extension=${loadableExtensionPaths.join(',')}`);
+        const extensionArg = loadableExtensionPaths.join(',');
+        launchParamter.push(`--disable-extensions-except=${extensionArg}`);
+        launchParamter.push(`--load-extension=${extensionArg}`);
       }
       if (headless && !useCloakBrowser) {
         launchParamter.push('--headless=new'); // 使用新版 headless 模式

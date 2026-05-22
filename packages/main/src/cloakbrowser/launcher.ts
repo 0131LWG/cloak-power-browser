@@ -105,7 +105,9 @@ export const buildCloakBrowserLaunchPlan = (
   }
 
   if (options.extensions?.length) {
-    args.push(`--load-extension=${options.extensions.join(',')}`);
+    const extensionArg = options.extensions.join(',');
+    args.push(`--disable-extensions-except=${extensionArg}`);
+    args.push(`--load-extension=${extensionArg}`);
   }
 
   if (options.headless) {
