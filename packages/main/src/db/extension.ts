@@ -31,6 +31,13 @@ const getExtensionByChromeId = async (chromeExtensionId: string) => {
   return row ? normalizeExtension(row as DB.Extension) : undefined;
 };
 
+const getExtensionsByChromeId = async (chromeExtensionId: string) => {
+  const rows = await db('extension')
+    .where({chrome_extension_id: chromeExtensionId})
+    .orderBy('updated_at', 'desc');
+  return rows.map(row => normalizeExtension(row as DB.Extension));
+};
+
 const createExtension = async (extension: DB.Extension) => {
   return await db('extension').insert(extension);
 };
@@ -115,6 +122,7 @@ export const ExtensionDB = {
   getAllExtensions,
   getExtensionById,
   getExtensionByChromeId,
+  getExtensionsByChromeId,
   createExtension,
   updateExtension,
   deleteExtension,

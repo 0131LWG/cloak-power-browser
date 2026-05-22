@@ -414,6 +414,21 @@ export const repairExtensionFilesIfNeeded = async (extension: DB.Extension) => {
   }
 
   if (extension.source_type === 'chrome_web_store') {
+    if (extension.chrome_extension_id) {
+      const sameChromeExtensions = await ExtensionDB.getExtensionsByChromeId(extension.chrome_extension_id);
+      const reusableExtension = sameChromeExtensions.find(
+        item => item.id !== extension.id && item.path && existsSync(item.path),
+      );
+      if (reusableExtension?.path) {
+        await ExtensionDB.updateExtension(extension.id!, {
+          path: reusableExtension.path,
+          version: reusableExtension.version,
+          updated_at: db.fn.now() as unknown as string,
+        });
+        return {success: true, extension: await ExtensionDB.getExtensionById(extension.id!)};
+      }
+    }
+
     const source = extension.source_url || extension.chrome_extension_id;
     if (!source) {
       return {success: false, error: 'Missing source_url/chrome_extension_id for synced extension'};

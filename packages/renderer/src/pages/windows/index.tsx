@@ -615,26 +615,52 @@ const Windows = () => {
   };
 
   const openWindows = async (id?: number) => {
-    setLoading(true);
     if (id) {
       const targetWindow = rawWindowData.find(windowItem => windowItem.id === id);
       if (targetWindow && isWindowLockedByOtherDevice(targetWindow)) {
         messageApi.warning('Window is already open on another device');
-        setLoading(false);
         return;
       }
-      await WindowBridge?.open(id);
-      setLoading(false);
+      setRawWindowData(windowData =>
+        windowData.map(window => (window.id === id ? {...window, status: WINDOW_STATUS.PREPARING} : window)),
+      );
+      void WindowBridge?.open(id).catch((error: unknown) => {
+        messageApi.error((error as Error)?.message || 'Failed to open window');
+        setRawWindowData(windowData =>
+          windowData.map(window => (window.id === id ? {...window, status: WINDOW_STATUS.NORMAL} : window)),
+        );
+      });
     } else {
+      const openTargets = selectedRowKeys.filter(rowKey => {
+        const targetWindow = rawWindowData.find(windowItem => windowItem.id === rowKey);
+        return !(targetWindow && isWindowLockedByOtherDevice(targetWindow));
+      });
+
+      if (!openTargets.length) {
+        return;
+      }
+
+      setRawWindowData(windowData =>
+        windowData.map(window =>
+          openTargets.includes(window.id!) ? {...window, status: WINDOW_STATUS.PREPARING} : window,
+        ),
+      );
+
       for (let index = 0; index < selectedRowKeys.length; index++) {
         const rowKey = selectedRowKeys[index];
         const targetWindow = rawWindowData.find(windowItem => windowItem.id === rowKey);
         if (targetWindow && isWindowLockedByOtherDevice(targetWindow)) {
           continue;
         }
-        await WindowBridge?.open(rowKey);
+        void WindowBridge?.open(rowKey).catch((error: unknown) => {
+          messageApi.error((error as Error)?.message || `Failed to open window #${rowKey}`);
+          setRawWindowData(windowData =>
+            windowData.map(window =>
+              window.id === rowKey ? {...window, status: WINDOW_STATUS.NORMAL} : window,
+            ),
+          );
+        });
       }
-      setLoading(false);
     }
     await fetchCloudLocks();
   };
