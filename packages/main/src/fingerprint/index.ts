@@ -40,6 +40,7 @@ import {
   stopCloudCookieSync,
   uploadCloudProfileData,
 } from '../cloud/profile-data-sync';
+import {repairExtensionFilesIfNeeded} from '../services/extension-service';
 
 const mutex = new Mutex();
 
@@ -223,7 +224,38 @@ export async function openFingerprintWindow(id: number, headless = false) {
     }
 
     const extensionData = await ExtensionDB.getExtensionsByWindowId(id);
-    const extensionPaths = extensionData.map(e => e.path).filter((extensionPath): extensionPath is string => Boolean(extensionPath));
+    for (const extension of extensionData) {
+      if (extension.path && existsSync(extension.path)) {
+        continue;
+      }
+
+      try {
+        const repairResult = await repairExtensionFilesIfNeeded(extension);
+        if (!repairResult?.success) {
+          const repairErrorText = repairResult && 'error' in repairResult ? repairResult.error : undefined;
+          logger.warn('Failed to repair missing extension files', {
+            windowId: id,
+            extensionId: extension.id,
+            extensionCloudId: extension.cloud_id,
+            sourceType: extension.source_type,
+            error: repairErrorText || 'unknown error',
+          });
+        }
+      } catch (repairError) {
+        logger.warn('Failed to repair missing extension files', {
+          windowId: id,
+          extensionId: extension.id,
+          extensionCloudId: extension.cloud_id,
+          sourceType: extension.source_type,
+          error: repairError instanceof Error ? repairError.message : String(repairError),
+        });
+      }
+    }
+
+    const refreshedExtensionData = await ExtensionDB.getExtensionsByWindowId(id);
+    const extensionPaths = refreshedExtensionData
+      .map(e => e.path)
+      .filter((extensionPath): extensionPath is string => Boolean(extensionPath));
     const loadableExtensionPaths = extensionPaths.filter(extensionPath => existsSync(extensionPath));
     const missingExtensionPaths = extensionPaths.filter(extensionPath => !existsSync(extensionPath));
     if (missingExtensionPaths.length > 0) {

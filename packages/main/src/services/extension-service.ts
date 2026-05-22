@@ -408,6 +408,29 @@ const installFromDirectory = async (directoryPath: string) => {
   });
 };
 
+export const repairExtensionFilesIfNeeded = async (extension: DB.Extension) => {
+  if (extension.path && existsSync(extension.path)) {
+    return {success: true, extension};
+  }
+
+  if (extension.source_type === 'chrome_web_store') {
+    const source = extension.source_url || extension.chrome_extension_id;
+    if (!source) {
+      return {success: false, error: 'Missing source_url/chrome_extension_id for synced extension'};
+    }
+    return await installFromWebStore(source);
+  }
+
+  if (extension.source_type === 'custom' && extension.source_url && existsSync(extension.source_url)) {
+    return await installFromDirectory(extension.source_url);
+  }
+
+  return {
+    success: false,
+    error: 'Custom extension source directory is unavailable on this machine',
+  };
+};
+
 const deleteManagedExtensionFiles = async (extensionId: number) => {
   const extensionsPath = await getManagedExtensionsRoot();
   await rm(join(extensionsPath, extensionId.toString()), {recursive: true, force: true});
