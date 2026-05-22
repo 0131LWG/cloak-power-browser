@@ -436,6 +436,39 @@ const deleteManagedExtensionFiles = async (extensionId: number) => {
   await rm(join(extensionsPath, extensionId.toString()), {recursive: true, force: true});
 };
 
+const makeWindowExtensionCloudId = (extensionCloudId: string, windowCloudId: string) =>
+  `${extensionCloudId}:${windowCloudId}`;
+
+const buildWindowExtensionSyncPayloads = async (extensionId: number, windowIds: number[]) => {
+  if (!windowIds.length) {
+    return [];
+  }
+
+  const [extension, windows] = await Promise.all([
+    ExtensionDB.getExtensionById(extensionId),
+    db('window').whereIn('id', windowIds).select('id', 'cloud_id'),
+  ]);
+
+  if (!extension?.cloud_id) {
+    return [];
+  }
+
+  const cloudConfig = await getCloudSyncConfig();
+  return windows
+    .filter(window => window.cloud_id)
+    .map(window => ({
+      cloud_id: makeWindowExtensionCloudId(extension.cloud_id!, window.cloud_id),
+      workspace_id: cloudConfig.workspaceId,
+      extension_id: extensionId,
+      window_id: window.id,
+      extension_cloud_id: extension.cloud_id,
+      window_cloud_id: window.cloud_id,
+      sync_dirty: cloudConfig.enabled,
+      updated_by_device_id: cloudConfig.deviceId,
+      updated_at: db.fn.now() as unknown as string,
+    }));
+};
+
 export const initExtensionService = () => {
   ipcMain.handle('extension-create', async (_, extension: DB.Extension) => {
     const cloudConfig = await getCloudSyncConfig();
@@ -489,7 +522,35 @@ export const initExtensionService = () => {
   ipcMain.handle(
     'extension-apply-to-windows',
     async (_, extensionId: number, windowIds: number[]) => {
-      return await ExtensionDB.insertExtensionWindows(extensionId, windowIds);
+      const existingRows = await db('window_extension')
+        .where({extension_id: extensionId})
+        .whereIn('window_id', windowIds)
+        .select('window_id');
+      const existingWindowIds = new Set(existingRows.map(row => Number(row.window_id)));
+      const toAdd = windowIds.filter(windowId => !existingWindowIds.has(Number(windowId)));
+      const result = await ExtensionDB.insertExtensionWindows(extensionId, windowIds);
+      const payloads = await buildWindowExtensionSyncPayloads(extensionId, toAdd);
+
+      for (const payload of payloads) {
+        await db('window_extension')
+          .where({extension_id: payload.extension_id, window_id: payload.window_id})
+          .update({
+            cloud_id: payload.cloud_id,
+            workspace_id: payload.workspace_id,
+            window_cloud_id: payload.window_cloud_id,
+            extension_cloud_id: payload.extension_cloud_id,
+            sync_dirty: payload.sync_dirty,
+            updated_by_device_id: payload.updated_by_device_id,
+            updated_at: payload.updated_at,
+          });
+        await enqueueSyncOutbox('window_extension', 'create', {
+          localId: payload.window_id,
+          cloudId: payload.cloud_id,
+          data: payload,
+        });
+      }
+
+      return result;
     },
   );
 
@@ -500,7 +561,18 @@ export const initExtensionService = () => {
   ipcMain.handle(
     'delete-extension-windows',
     async (_, extensionId: number, windowIds: number[]) => {
-      return await ExtensionDB.deleteExtensionWindows(extensionId, windowIds);
+      const payloads = await buildWindowExtensionSyncPayloads(extensionId, windowIds);
+      const result = await ExtensionDB.deleteExtensionWindows(extensionId, windowIds);
+
+      for (const payload of payloads) {
+        await enqueueSyncOutbox('window_extension', 'delete', {
+          localId: payload.window_id,
+          cloudId: payload.cloud_id,
+          data: payload,
+        });
+      }
+
+      return result;
     },
   );
 
@@ -529,8 +601,11 @@ export const initExtensionService = () => {
     'extension-update',
     async (_, extensionId: number, extension: Partial<DB.Extension>) => {
       const cloudConfig = await getCloudSyncConfig();
+      const existingExtension = await ExtensionDB.getExtensionById(extensionId);
       const payload = {
         ...extension,
+        cloud_id: extension.cloud_id || existingExtension?.cloud_id || randomUUID(),
+        workspace_id: extension.workspace_id || existingExtension?.workspace_id || cloudConfig.workspaceId,
         sync_dirty: cloudConfig.enabled,
         updated_by_device_id: cloudConfig.deviceId,
         updated_at: db.fn.now() as unknown as string,
@@ -539,7 +614,10 @@ export const initExtensionService = () => {
       await enqueueSyncOutbox('extension', 'update', {
         localId: extensionId,
         cloudId: payload.cloud_id,
-        data: payload,
+        data: {
+          ...existingExtension,
+          ...payload,
+        },
       });
       return result;
     },

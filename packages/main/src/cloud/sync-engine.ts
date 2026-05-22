@@ -288,6 +288,9 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
     case 'extension':
       await applyExtensionSyncEvent(cloudId, event.operation, payload);
       return;
+    case 'window_extension':
+      await applyWindowExtensionSyncEvent(cloudId, event.operation, payload);
+      return;
     default:
       return;
   }
@@ -338,11 +341,72 @@ const applyExtensionSyncEvent = async (
   ]);
 };
 
+const applyWindowExtensionSyncEvent = async (
+  cloudId: string,
+  operation: 'create' | 'update' | 'delete',
+  payload: Record<string, unknown>,
+) => {
+  const windowCloudId = toNullableString(payload.window_cloud_id);
+  const extensionCloudId = toNullableString(payload.extension_cloud_id);
+
+  if (operation === 'delete') {
+    const query = db('window_extension');
+    if (cloudId) {
+      await query.where({cloud_id: cloudId}).delete();
+      return;
+    }
+    if (windowCloudId && extensionCloudId) {
+      await query.where({window_cloud_id: windowCloudId, extension_cloud_id: extensionCloudId}).delete();
+    }
+    return;
+  }
+
+  if (!windowCloudId || !extensionCloudId) {
+    return;
+  }
+
+  const windowId = await findLocalIdByCloudId('window', windowCloudId);
+  const extensionId = await findLocalIdByCloudId('extension', extensionCloudId);
+  if (!windowId || !extensionId) {
+    return;
+  }
+
+  const updateData = compactUndefined({
+    cloud_id: cloudId || `${extensionCloudId}:${windowCloudId}`,
+    workspace_id: toNullableString(payload.workspace_id),
+    window_cloud_id: windowCloudId,
+    extension_cloud_id: extensionCloudId,
+    window_id: windowId,
+    extension_id: extensionId,
+    sync_dirty: false,
+    sync_version: payload.sync_version,
+    sync_deleted_at: payload.sync_deleted_at,
+    last_synced_at: payload.last_synced_at,
+    updated_by_device_id: payload.updated_by_device_id,
+  });
+
+  const existing = await db('window_extension')
+    .where({window_id: windowId, extension_id: extensionId})
+    .first();
+  if (existing) {
+    await db('window_extension').where({id: existing.id}).update(updateData);
+    return;
+  }
+
+  await db('window_extension').insert(updateData);
+};
+
 const applyWindowSyncEvent = async (
   cloudId: string,
   operation: 'create' | 'update' | 'delete',
   payload: Record<string, unknown>,
 ) => {
+  if (operation === 'delete') {
+    await db('window_extension').where({window_cloud_id: cloudId}).delete();
+    await applyEntityUpsertOrDelete('window', cloudId, operation, payload, []);
+    return;
+  }
+
   const groupCloudId = toNullableString(payload.group_cloud_id);
   const proxyCloudId = toNullableString(payload.proxy_cloud_id);
   const groupId = groupCloudId ? await findLocalIdByCloudId('group', groupCloudId) : null;
@@ -391,6 +455,9 @@ const applyEntityUpsertOrDelete = async (
   allowedFields: string[],
 ) => {
   if (operation === 'delete') {
+    if (tableName === 'extension') {
+      await db('window_extension').where({extension_cloud_id: cloudId}).delete();
+    }
     await db(tableName).where({cloud_id: cloudId}).delete();
     return;
   }
@@ -419,6 +486,16 @@ const sanitizePayload = (payload: Record<string, unknown>, allowedFields: string
     }
   }
   return sanitized;
+};
+
+const compactUndefined = (payload: Record<string, unknown>) => {
+  const compacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value !== undefined) {
+      compacted[key] = value;
+    }
+  }
+  return compacted;
 };
 
 const findLocalIdByCloudId = async (tableName: string, cloudId: string) => {
