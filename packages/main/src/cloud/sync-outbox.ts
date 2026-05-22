@@ -12,6 +12,30 @@ export type SyncEntityType =
 
 export type SyncOperation = 'create' | 'update' | 'delete';
 
+const safeStringifyPayload = (value: unknown) => {
+  const seen = new WeakSet<object>();
+
+  return JSON.stringify(value ?? {}, (_key, currentValue) => {
+    if (currentValue instanceof Error) {
+      return {
+        name: currentValue.name,
+        message: currentValue.message,
+        stack: currentValue.stack,
+        code: (currentValue as NodeJS.ErrnoException).code,
+      };
+    }
+
+    if (typeof currentValue === 'object' && currentValue !== null) {
+      if (seen.has(currentValue)) {
+        return '[Circular]';
+      }
+      seen.add(currentValue);
+    }
+
+    return currentValue;
+  });
+};
+
 export const enqueueSyncOutbox = async (
   entityType: SyncEntityType,
   operation: SyncOperation,
@@ -33,7 +57,7 @@ export const enqueueSyncOutbox = async (
     local_id: payload.localId || null,
     cloud_id: payload.cloudId || null,
     operation,
-    payload: JSON.stringify(payload.data || {}),
+    payload: safeStringifyPayload(payload.data),
     updated_at: db.fn.now(),
   });
 };
