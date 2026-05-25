@@ -12,6 +12,7 @@ import {
   Row,
   Col,
   Typography,
+  Progress,
   message,
   Tooltip,
 } from 'antd';
@@ -103,6 +104,12 @@ const Windows = () => {
   const [selectedProxy, setSelectedProxy] = useState<number>();
   const [cloudSyncDeviceId, setCloudSyncDeviceId] = useState('');
   const [cloudLocks, setCloudLocks] = useState(new Map<string, CloudLockState>());
+  const [cloudSyncProgress, setCloudSyncProgress] = useState<{
+    enabled: boolean;
+    pendingOutbox: number;
+    progressPercent: number;
+    syncing: boolean;
+  }>({enabled: false, pendingOutbox: 0, progressPercent: 100, syncing: false});
   const navigate = useNavigate();
 
   const moreActionDropdownItems: MenuProps['items'] = [
@@ -475,6 +482,20 @@ const Windows = () => {
     }
   };
 
+  const fetchCloudSyncProgress = async () => {
+    try {
+      const progress = await SyncBridge.getCloudSyncProgress();
+      setCloudSyncProgress({
+        enabled: Boolean(progress?.enabled),
+        pendingOutbox: Number(progress?.pendingOutbox || 0),
+        progressPercent: Number(progress?.progressPercent || 100),
+        syncing: Boolean(progress?.syncing),
+      });
+    } catch {
+      setCloudSyncProgress(prev => ({...prev, syncing: false}));
+    }
+  };
+
   const isWindowLockedByOtherDevice = (windowItem: DB.Window) => {
     const lock = windowItem.cloud_id ? cloudLocks.get(windowItem.cloud_id) : undefined;
     return Boolean(lock?.device_id && cloudSyncDeviceId && lock.device_id !== cloudSyncDeviceId);
@@ -563,10 +584,16 @@ const Windows = () => {
     fetchGroupData();
     fetchWindowData();
     fetchCloudLocks();
+    fetchCloudSyncProgress();
   }, []);
 
   useEffect(() => {
     const timer = window.setInterval(fetchCloudLocks, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(fetchCloudSyncProgress, 1500);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -924,6 +951,20 @@ const Windows = () => {
         className="content-card"
         bordered={false}
       >
+        {cloudSyncProgress.enabled && (
+          <div className="mb-3">
+            <Progress
+              percent={cloudSyncProgress.progressPercent}
+              status={cloudSyncProgress.syncing ? 'active' : 'normal'}
+              size="small"
+              format={() =>
+                cloudSyncProgress.pendingOutbox > 0
+                  ? `待同步 ${cloudSyncProgress.pendingOutbox}`
+                  : '已同步'
+              }
+            />
+          </div>
+        )}
         <Table
           className="content-table"
           columns={columns}

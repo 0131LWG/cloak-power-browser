@@ -7,12 +7,15 @@ import {ensureCloudSyncSchema} from './schema';
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 const DEFAULT_FLUSH_LIMIT = 50;
 const DEFAULT_PULL_LIMIT = 100;
-const DEFAULT_FLUSH_INTERVAL_MS = 30000;
+const DEFAULT_FLUSH_INTERVAL_MS = 5000;
+const MAX_DRAIN_ROUNDS = 40;
 const SYNC_STATE_ENTITY = 'all';
 
 let flushTimer: NodeJS.Timeout | undefined;
 let isFlushing = false;
 let isPulling = false;
+let maxPendingOutbox = 0;
+let lastSyncActivityAt = 0;
 
 export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
   await ensureCloudSyncSchema();
@@ -69,6 +72,7 @@ export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
         last_error: null,
       });
 
+    lastSyncActivityAt = Date.now();
     return {success: true, count: rows.length};
   } catch (error) {
     logger.error('Cloud sync outbox flush failed', error);
@@ -93,12 +97,12 @@ export const startCloudSyncEngine = async () => {
   }
 
   flushTimer = setInterval(() => {
-    Promise.all([flushSyncOutbox(), pullSyncEvents()]).catch(error => {
+    Promise.all([flushSyncOutboxUntilIdle(), pullSyncEventsUntilIdle()]).catch(error => {
       logger.error('Scheduled cloud sync failed', error);
     });
   }, DEFAULT_FLUSH_INTERVAL_MS);
 
-  Promise.all([flushSyncOutbox(), pullSyncEvents()]).catch(error => {
+  Promise.all([flushSyncOutboxUntilIdle(), pullSyncEventsUntilIdle()]).catch(error => {
     logger.error('Initial cloud sync failed', error);
   });
 };
@@ -208,6 +212,9 @@ export const pullSyncEvents = async (limit = DEFAULT_PULL_LIMIT) => {
     }
 
     await upsertSyncCursor(config.workspaceId, maxCursor);
+    if (appliedCount > 0) {
+      lastSyncActivityAt = Date.now();
+    }
     return {success: true, count: appliedCount, next_cursor: maxCursor};
   } catch (error) {
     logger.error('Cloud sync pull failed', error);
@@ -227,6 +234,76 @@ export const resetSyncCursor = async (workspaceId?: string) => {
 
   await db('sync_state').where({workspace_id: targetWorkspace, entity_type: SYNC_STATE_ENTITY}).delete();
   return {success: true, workspace_id: targetWorkspace};
+};
+
+export const getCloudSyncProgress = async () => {
+  await ensureCloudSyncSchema();
+  const config = await cloudApiClient.getConfig();
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      pendingOutbox: 0,
+      progressPercent: 100,
+      syncing: false,
+      lastSyncActivityAt: lastSyncActivityAt || null,
+    };
+  }
+
+  const pendingRow = await db('sync_outbox')
+    .whereNull('processed_at')
+    .where(builder => {
+      builder.whereNull('workspace_id');
+      if (config.workspaceId) {
+        builder.orWhere('workspace_id', config.workspaceId);
+      }
+    })
+    .count<{count: number}[]>('* as count')
+    .first();
+
+  const pendingOutbox = Number(pendingRow?.count || 0) || 0;
+  if (pendingOutbox > maxPendingOutbox) {
+    maxPendingOutbox = pendingOutbox;
+  }
+  if (pendingOutbox === 0) {
+    maxPendingOutbox = 0;
+  }
+
+  const baseline = Math.max(maxPendingOutbox, pendingOutbox, 1);
+  const progressPercent = pendingOutbox === 0 ? 100 : Math.max(1, Math.min(99, Math.round(((baseline - pendingOutbox) / baseline) * 100)));
+
+  return {
+    enabled: true,
+    pendingOutbox,
+    progressPercent,
+    syncing: isFlushing || isPulling || pendingOutbox > 0,
+    lastSyncActivityAt: lastSyncActivityAt || null,
+  };
+};
+
+const flushSyncOutboxUntilIdle = async () => {
+  let total = 0;
+  for (let round = 0; round < MAX_DRAIN_ROUNDS; round++) {
+    const result = await flushSyncOutbox();
+    const count = Number(result?.count || 0);
+    total += count;
+    if (!result?.success || result?.skipped || count < DEFAULT_FLUSH_LIMIT) {
+      break;
+    }
+  }
+  return {success: true, count: total};
+};
+
+const pullSyncEventsUntilIdle = async () => {
+  let total = 0;
+  for (let round = 0; round < MAX_DRAIN_ROUNDS; round++) {
+    const result = await pullSyncEvents();
+    const count = Number(result?.count || 0);
+    total += count;
+    if (!result?.success || result?.skipped || count < DEFAULT_PULL_LIMIT) {
+      break;
+    }
+  }
+  return {success: true, count: total};
 };
 
 const upsertSyncCursor = async (workspaceId: string, cursor: number) => {

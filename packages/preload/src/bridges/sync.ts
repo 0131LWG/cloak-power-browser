@@ -20,6 +20,14 @@ export interface MonitorInfo {
   index: number;
 }
 
+export interface CloudSyncProgress {
+  enabled: boolean;
+  pendingOutbox: number;
+  progressPercent: number;
+  syncing: boolean;
+  lastSyncActivityAt: number | null;
+}
+
 export const SyncBridge = {
   // Window arrangement (legacy)
   arrangeWindows: (args: {
@@ -69,6 +77,10 @@ export const SyncBridge = {
 
   pullCloudSync: () => {
     return ipcRenderer.invoke('cloud-sync-pull');
+  },
+
+  getCloudSyncProgress: (): Promise<CloudSyncProgress> => {
+    return ipcRenderer.invoke('cloud-sync-progress');
   },
 
   getCloudSyncLocks: () => {

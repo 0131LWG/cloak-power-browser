@@ -130,6 +130,44 @@ const withWindowRelationCloudIds = async (windowData?: DB.Window | null) => {
     proxy_cloud_id: proxyCloudId,
   };
 };
+
+const ensureCloudProxyForWindow = async (
+  windowData: DB.Window,
+  cloudConfig: Awaited<ReturnType<typeof getCloudSyncConfig>>,
+) => {
+  if (!cloudConfig.enabled || !windowData.proxy_id) {
+    return;
+  }
+
+  const proxy = await ProxyDB.getById(windowData.proxy_id);
+  if (!proxy) {
+    return;
+  }
+
+  const nextCloudId = proxy.cloud_id || randomUUID();
+  if (proxy.cloud_id !== nextCloudId || proxy.workspace_id !== cloudConfig.workspaceId || !proxy.sync_dirty) {
+    await ProxyDB.update(proxy.id!, {
+      ...proxy,
+      cloud_id: nextCloudId,
+      workspace_id: proxy.workspace_id || cloudConfig.workspaceId,
+      sync_dirty: true,
+      updated_by_device_id: cloudConfig.deviceId,
+    });
+  }
+
+  const refreshedProxy = await ProxyDB.getById(proxy.id!);
+  await enqueueSyncOutbox('proxy', proxy.cloud_id ? 'update' : 'create', {
+    localId: refreshedProxy?.id,
+    cloudId: refreshedProxy?.cloud_id || nextCloudId,
+    data: refreshedProxy || {
+      ...proxy,
+      cloud_id: nextCloudId,
+      workspace_id: proxy.workspace_id || cloudConfig.workspaceId,
+      sync_dirty: true,
+      updated_by_device_id: cloudConfig.deviceId,
+    },
+  });
+};
 export const initWindowService = () => {
   logger.info('init window service...');
   ipcMain.handle('window-import', async (_, filePath: string) => {
@@ -147,9 +185,20 @@ export const initWindowService = () => {
     const result = await WindowDB.externalImport(fileData);
     const cloudConfig = await getCloudSyncConfig();
     if (cloudConfig.enabled && result.data?.length) {
+      const importedWindows: DB.Window[] = [];
       for (const id of result.data) {
         const importedWindow = await WindowDB.getById(id);
         if (!importedWindow) continue;
+        importedWindows.push(importedWindow);
+      }
+
+      // Ensure related proxies are cloud-aware first so window payload can carry proxy_cloud_id.
+      for (const importedWindow of importedWindows) {
+        await ensureCloudProxyForWindow(importedWindow, cloudConfig);
+      }
+
+      for (const importedWindow of importedWindows) {
+        const id = importedWindow.id!;
         const cloudId = importedWindow.cloud_id || randomUUID();
         await WindowDB.update(id, {
           ...importedWindow,
@@ -166,6 +215,7 @@ export const initWindowService = () => {
           data: syncPayload,
         });
       }
+      flushWindowSyncSoon();
     }
     return result;
   });

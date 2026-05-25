@@ -5,6 +5,7 @@ import {releaseAllProfileLocks} from '../cloud/profile-lock-service';
 import {
   flushSyncOutbox,
   pullSyncEvents,
+  getCloudSyncProgress,
   resetSyncCursor,
   startCloudSyncEngine,
   stopCloudSyncEngine,
@@ -41,6 +42,10 @@ export const initCloudSyncService = () => {
 
   ipcMain.handle('cloud-sync-pull', async () => {
     return await pullSyncEvents();
+  });
+
+  ipcMain.handle('cloud-sync-progress', async () => {
+    return await getCloudSyncProgress();
   });
 
   ipcMain.handle('cloud-sync-locks', async () => {
