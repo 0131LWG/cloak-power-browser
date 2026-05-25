@@ -914,6 +914,15 @@ const Windows = () => {
           >
             {t('refresh')}
           </Button>
+          {cloudSyncProgress.enabled && cloudSyncProgress.pendingOutbox > 0 && (
+            <Progress
+              percent={cloudSyncProgress.progressPercent}
+              status={cloudSyncProgress.syncing ? 'active' : 'normal'}
+              size="small"
+              style={{width: 200, marginLeft: 8}}
+              format={() => `待同步 ${cloudSyncProgress.pendingOutbox}`}
+            />
+          )}
         </Space>
         <Space
           size={8}
@@ -951,20 +960,6 @@ const Windows = () => {
         className="content-card"
         bordered={false}
       >
-        {cloudSyncProgress.enabled && (
-          <div className="mb-3">
-            <Progress
-              percent={cloudSyncProgress.progressPercent}
-              status={cloudSyncProgress.syncing ? 'active' : 'normal'}
-              size="small"
-              format={() =>
-                cloudSyncProgress.pendingOutbox > 0
-                  ? `待同步 ${cloudSyncProgress.pendingOutbox}`
-                  : '已同步'
-              }
-            />
-          </div>
-        )}
         <Table
           className="content-table"
           columns={columns}
