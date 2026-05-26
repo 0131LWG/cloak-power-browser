@@ -168,6 +168,44 @@ const ensureCloudProxyForWindow = async (
     },
   });
 };
+
+const ensureCloudGroupForWindow = async (
+  windowData: DB.Window,
+  cloudConfig: Awaited<ReturnType<typeof getCloudSyncConfig>>,
+) => {
+  if (!cloudConfig.enabled || !windowData.group_id) {
+    return;
+  }
+
+  const group = await GroupDB.getById(windowData.group_id);
+  if (!group) {
+    return;
+  }
+
+  const nextCloudId = group.cloud_id || randomUUID();
+  if (group.cloud_id !== nextCloudId || group.workspace_id !== cloudConfig.workspaceId || !group.sync_dirty) {
+    await GroupDB.update(group.id!, {
+      ...group,
+      cloud_id: nextCloudId,
+      workspace_id: group.workspace_id || cloudConfig.workspaceId,
+      sync_dirty: true,
+      updated_by_device_id: cloudConfig.deviceId,
+    });
+  }
+
+  const refreshedGroup = await GroupDB.getById(group.id!);
+  await enqueueSyncOutbox('group', group.cloud_id ? 'update' : 'create', {
+    localId: refreshedGroup?.id,
+    cloudId: refreshedGroup?.cloud_id || nextCloudId,
+    data: refreshedGroup || {
+      ...group,
+      cloud_id: nextCloudId,
+      workspace_id: group.workspace_id || cloudConfig.workspaceId,
+      sync_dirty: true,
+      updated_by_device_id: cloudConfig.deviceId,
+    },
+  });
+};
 export const initWindowService = () => {
   logger.info('init window service...');
   ipcMain.handle('window-import', async (_, filePath: string) => {
@@ -194,6 +232,7 @@ export const initWindowService = () => {
 
       // Ensure related proxies are cloud-aware first so window payload can carry proxy_cloud_id.
       for (const importedWindow of importedWindows) {
+        await ensureCloudGroupForWindow(importedWindow, cloudConfig);
         await ensureCloudProxyForWindow(importedWindow, cloudConfig);
       }
 

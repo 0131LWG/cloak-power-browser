@@ -91,6 +91,10 @@ export const SyncBridge = {
     return ipcRenderer.invoke('cloud-sync-reset-cursor', workspaceId);
   },
 
+  rebuildCloudSyncOutbox: () => {
+    return ipcRenderer.invoke('cloud-sync-rebuild-outbox');
+  },
+
   // Listen to global shortcuts from main process
   onShortcutStart: (callback: () => void) => {
     const listener = () => callback();

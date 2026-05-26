@@ -1,4 +1,4 @@
-import {Button, Card, Divider, Form, Input, Space, Switch, Typography} from 'antd';
+import {Button, Card, Divider, Form, Input, Space, Switch, Typography, message} from 'antd';
 import {CommonBridge, SyncBridge} from '#preload';
 import {useEffect, useState} from 'react';
 import type {SettingOptions} from '../../../../shared/types/common';
@@ -28,6 +28,8 @@ const Settings = () => {
     automationConnect: false,
   });
   const [form] = Form.useForm();
+  const [messageApi, contextHolder] = message.useMessage();
+  const [rebuildingCloudSync, setRebuildingCloudSync] = useState(false);
   const {t} = useTranslation();
   const navigate = useNavigate();
 
@@ -68,10 +70,30 @@ const Settings = () => {
     handleSave(newFormValue);
   };
 
+  const handleRebuildCloudSync = async () => {
+    if (rebuildingCloudSync) return;
+    setRebuildingCloudSync(true);
+    try {
+      const result = await SyncBridge.rebuildCloudSyncOutbox();
+      if (!result?.success) {
+        messageApi.error(result?.message || '修复旧数据同步失败');
+        return;
+      }
+      messageApi.success(
+        `修复任务已提交：分组 ${result.groupsEnqueued}，代理 ${result.proxiesEnqueued}，窗口 ${result.windowsEnqueued}，已推送 ${result.flushed}`,
+      );
+    } catch (error) {
+      messageApi.error((error as Error)?.message || '修复旧数据同步失败');
+    } finally {
+      setRebuildingCloudSync(false);
+    }
+  };
+
   // type FieldType = SettingOptions;
 
   return (
     <>
+      {contextHolder}
       <Card
         className="content-card p-6"
         bordered={false}
@@ -191,6 +213,14 @@ const Settings = () => {
                 退出登录
               </Button>
             </Space>
+          </Form.Item>
+          <Form.Item label="Repair">
+            <Button
+              onClick={handleRebuildCloudSync}
+              loading={rebuildingCloudSync}
+            >
+              修复旧数据同步
+            </Button>
           </Form.Item>
           <Form.Item
             label="Device Name"

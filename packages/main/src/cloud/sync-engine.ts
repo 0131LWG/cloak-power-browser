@@ -3,6 +3,8 @@ import {createLogger} from '../../../shared/utils/logger';
 import {SERVICE_LOGGER_LABEL} from '../constants';
 import {cloudApiClient} from './client';
 import {ensureCloudSyncSchema} from './schema';
+import {randomUUID} from 'crypto';
+import {enqueueSyncOutbox} from './sync-outbox';
 
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 const DEFAULT_FLUSH_LIMIT = 50;
@@ -91,6 +93,7 @@ export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
 
 export const startCloudSyncEngine = async () => {
   await ensureCloudSyncSchema();
+  await backfillLegacyCloudSyncData();
   await repairWindowRelationsFromCloudIds();
   const config = await cloudApiClient.getConfig();
   if (!config.enabled || flushTimer) {
@@ -237,6 +240,114 @@ export const resetSyncCursor = async (workspaceId?: string) => {
   return {success: true, workspace_id: targetWorkspace};
 };
 
+export const rebuildCloudSyncOutboxForWorkspace = async () => {
+  const config = await cloudApiClient.getConfig();
+  if (!config.enabled || !config.workspaceId) {
+    return {success: false, message: 'cloud sync is disabled or workspace_id is empty'};
+  }
+
+  await backfillLegacyCloudSyncData();
+  await repairWindowRelationsFromCloudIds();
+
+  let groupsEnqueued = 0;
+  let proxiesEnqueued = 0;
+  let windowsEnqueued = 0;
+
+  const groups = await db('group')
+    .where(builder => {
+      builder.whereNull('workspace_id').orWhere('workspace_id', config.workspaceId);
+    })
+    .select('*');
+  for (const group of groups) {
+    const cloudId = group.cloud_id || randomUUID();
+    if (!group.cloud_id || !group.workspace_id) {
+      await db('group').where({id: group.id}).update({
+        cloud_id: cloudId,
+        workspace_id: group.workspace_id || config.workspaceId,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+    }
+    const latestGroup = await db('group').where({id: group.id}).first();
+    await enqueueSyncOutbox('group', group.cloud_id ? 'update' : 'create', {
+      localId: group.id,
+      cloudId,
+      data: latestGroup,
+    });
+    groupsEnqueued++;
+  }
+
+  const proxies = await db('proxy')
+    .where(builder => {
+      builder.whereNull('workspace_id').orWhere('workspace_id', config.workspaceId);
+    })
+    .select('*');
+  for (const proxy of proxies) {
+    const cloudId = proxy.cloud_id || randomUUID();
+    if (!proxy.cloud_id || !proxy.workspace_id) {
+      await db('proxy').where({id: proxy.id}).update({
+        cloud_id: cloudId,
+        workspace_id: proxy.workspace_id || config.workspaceId,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+    }
+    const latestProxy = await db('proxy').where({id: proxy.id}).first();
+    await enqueueSyncOutbox('proxy', proxy.cloud_id ? 'update' : 'create', {
+      localId: proxy.id,
+      cloudId,
+      data: latestProxy,
+    });
+    proxiesEnqueued++;
+  }
+
+  const windows = await db('window')
+    .where('status', '>', 0)
+    .andWhere(builder => {
+      builder.whereNull('workspace_id').orWhere('workspace_id', config.workspaceId);
+    })
+    .select('*');
+  for (const windowData of windows) {
+    const cloudId = windowData.cloud_id || randomUUID();
+    if (!windowData.cloud_id || !windowData.workspace_id) {
+      await db('window').where({id: windowData.id}).update({
+        cloud_id: cloudId,
+        workspace_id: windowData.workspace_id || config.workspaceId,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+    }
+    const latestWindow = await db('window').where({id: windowData.id}).first();
+    await enqueueSyncOutbox('window', windowData.cloud_id ? 'update' : 'create', {
+      localId: windowData.id,
+      cloudId,
+      data: latestWindow,
+    });
+    windowsEnqueued++;
+  }
+
+  const flushResult = await flushSyncOutboxUntilIdle();
+  logger.info('Cloud sync outbox rebuilt for workspace', {
+    workspaceId: config.workspaceId,
+    groupsEnqueued,
+    proxiesEnqueued,
+    windowsEnqueued,
+    flushed: flushResult?.count || 0,
+  });
+
+  return {
+    success: true,
+    workspaceId: config.workspaceId,
+    groupsEnqueued,
+    proxiesEnqueued,
+    windowsEnqueued,
+    flushed: flushResult?.count || 0,
+  };
+};
+
 export const getCloudSyncProgress = async () => {
   await ensureCloudSyncSchema();
   const config = await cloudApiClient.getConfig();
@@ -304,6 +415,7 @@ const pullSyncEventsUntilIdle = async () => {
       break;
     }
   }
+  await repairWindowRelationsFromCloudIds();
   return {success: true, count: total};
 };
 
@@ -642,13 +754,36 @@ const repairWindowRelationsFromCloudIds = async () => {
     .select('id', 'group_id', 'group_cloud_id', 'proxy_id', 'proxy_cloud_id')
     .where('status', '>', 0);
 
+  let updatedWindows = 0;
+  let repairedGroupIdCount = 0;
+  let repairedProxyIdCount = 0;
+  let repairedGroupCloudIdCount = 0;
+  let repairedProxyCloudIdCount = 0;
+
   for (const row of windows) {
     const updates: Record<string, unknown> = {};
+
+    if (hasGroupCloudIdColumn && row.group_id && (!row.group_cloud_id || String(row.group_cloud_id).trim() === '')) {
+      const group = await db('group').select('cloud_id').where({id: row.group_id}).first();
+      if (group?.cloud_id) {
+        updates.group_cloud_id = group.cloud_id;
+        repairedGroupCloudIdCount++;
+      }
+    }
 
     if (hasGroupCloudIdColumn && row.group_cloud_id && (!row.group_id || row.group_id === 0)) {
       const groupId = await findLocalIdByCloudId('group', String(row.group_cloud_id));
       if (groupId) {
         updates.group_id = groupId;
+        repairedGroupIdCount++;
+      }
+    }
+
+    if (hasProxyCloudIdColumn && row.proxy_id && (!row.proxy_cloud_id || String(row.proxy_cloud_id).trim() === '')) {
+      const proxy = await db('proxy').select('cloud_id').where({id: row.proxy_id}).first();
+      if (proxy?.cloud_id) {
+        updates.proxy_cloud_id = proxy.cloud_id;
+        repairedProxyCloudIdCount++;
       }
     }
 
@@ -656,6 +791,7 @@ const repairWindowRelationsFromCloudIds = async () => {
       const proxyId = await findLocalIdByCloudId('proxy', String(row.proxy_cloud_id));
       if (proxyId) {
         updates.proxy_id = proxyId;
+        repairedProxyIdCount++;
       }
     }
 
@@ -666,7 +802,139 @@ const repairWindowRelationsFromCloudIds = async () => {
           ...updates,
           updated_at: db.fn.now(),
         });
+      updatedWindows++;
     }
+  }
+
+  logger.info('Window relation repair completed', {
+    scanned: windows.length,
+    updatedWindows,
+    repairedGroupIdCount,
+    repairedProxyIdCount,
+    repairedGroupCloudIdCount,
+    repairedProxyCloudIdCount,
+  });
+};
+
+const backfillLegacyCloudSyncData = async () => {
+  const config = await cloudApiClient.getConfig();
+  if (!config.enabled || !config.workspaceId) {
+    return;
+  }
+
+  let groupsPatched = 0;
+  let proxiesPatched = 0;
+  let windowsPatched = 0;
+
+  const groups = await db('group').select('*');
+  for (const group of groups) {
+    const nextCloudId = group.cloud_id || randomUUID();
+    const nextWorkspaceId = group.workspace_id || config.workspaceId;
+    const shouldPatch = !group.cloud_id || !group.workspace_id;
+    if (!shouldPatch) continue;
+
+    await db('group')
+      .where({id: group.id})
+      .update({
+        cloud_id: nextCloudId,
+        workspace_id: nextWorkspaceId,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+
+    const latestGroup = await db('group').where({id: group.id}).first();
+    await enqueueSyncOutbox('group', group.cloud_id ? 'update' : 'create', {
+      localId: group.id,
+      cloudId: nextCloudId,
+      data: latestGroup,
+    });
+    groupsPatched++;
+  }
+
+  const proxies = await db('proxy').select('*');
+  for (const proxy of proxies) {
+    const nextCloudId = proxy.cloud_id || randomUUID();
+    const nextWorkspaceId = proxy.workspace_id || config.workspaceId;
+    const shouldPatch = !proxy.cloud_id || !proxy.workspace_id;
+    if (!shouldPatch) continue;
+
+    await db('proxy')
+      .where({id: proxy.id})
+      .update({
+        cloud_id: nextCloudId,
+        workspace_id: nextWorkspaceId,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+
+    const latestProxy = await db('proxy').where({id: proxy.id}).first();
+    await enqueueSyncOutbox('proxy', proxy.cloud_id ? 'update' : 'create', {
+      localId: proxy.id,
+      cloudId: nextCloudId,
+      data: latestProxy,
+    });
+    proxiesPatched++;
+  }
+
+  const groupCloudById = new Map<number, string>();
+  for (const group of await db('group').select('id', 'cloud_id')) {
+    if (group?.id && group?.cloud_id) {
+      groupCloudById.set(Number(group.id), String(group.cloud_id));
+    }
+  }
+  const proxyCloudById = new Map<number, string>();
+  for (const proxy of await db('proxy').select('id', 'cloud_id')) {
+    if (proxy?.id && proxy?.cloud_id) {
+      proxyCloudById.set(Number(proxy.id), String(proxy.cloud_id));
+    }
+  }
+
+  const windows = await db('window').where('status', '>', 0).select('*');
+  for (const windowData of windows) {
+    const nextCloudId = windowData.cloud_id || randomUUID();
+    const nextWorkspaceId = windowData.workspace_id || config.workspaceId;
+    const nextGroupCloudId =
+      windowData.group_cloud_id || (windowData.group_id ? groupCloudById.get(Number(windowData.group_id)) : null);
+    const nextProxyCloudId =
+      windowData.proxy_cloud_id || (windowData.proxy_id ? proxyCloudById.get(Number(windowData.proxy_id)) : null);
+
+    const shouldPatch =
+      !windowData.cloud_id ||
+      !windowData.workspace_id ||
+      (windowData.group_id && !windowData.group_cloud_id && Boolean(nextGroupCloudId)) ||
+      (windowData.proxy_id && !windowData.proxy_cloud_id && Boolean(nextProxyCloudId));
+    if (!shouldPatch) continue;
+
+    await db('window')
+      .where({id: windowData.id})
+      .update({
+        cloud_id: nextCloudId,
+        workspace_id: nextWorkspaceId,
+        group_cloud_id: nextGroupCloudId || null,
+        proxy_cloud_id: nextProxyCloudId || null,
+        sync_dirty: true,
+        updated_by_device_id: config.deviceId,
+        updated_at: db.fn.now(),
+      });
+
+    const latestWindow = await db('window').where({id: windowData.id}).first();
+    await enqueueSyncOutbox('window', windowData.cloud_id ? 'update' : 'create', {
+      localId: windowData.id,
+      cloudId: nextCloudId,
+      data: latestWindow,
+    });
+    windowsPatched++;
+  }
+
+  if (groupsPatched || proxiesPatched || windowsPatched) {
+    logger.info('Legacy cloud sync backfill completed', {
+      workspaceId: config.workspaceId,
+      groupsPatched,
+      proxiesPatched,
+      windowsPatched,
+    });
   }
 };
 

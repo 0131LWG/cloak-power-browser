@@ -7,6 +7,7 @@ import {
   pullSyncEvents,
   getCloudSyncProgress,
   resetSyncCursor,
+  rebuildCloudSyncOutboxForWorkspace,
   startCloudSyncEngine,
   stopCloudSyncEngine,
 } from '../cloud/sync-engine';
@@ -58,6 +59,10 @@ export const initCloudSyncService = () => {
 
   ipcMain.handle('cloud-sync-reset-cursor', async (_, workspaceId?: string) => {
     return await resetSyncCursor(workspaceId);
+  });
+
+  ipcMain.handle('cloud-sync-rebuild-outbox', async () => {
+    return await rebuildCloudSyncOutboxForWorkspace();
   });
 
   ipcMain.handle('cloud-sync-release-locks', async () => {
