@@ -47,7 +47,6 @@ const mutex = new Mutex();
 const logger = createLogger(WINDOW_LOGGER_LABEL);
 
 const HOST = '127.0.0.1';
-const blankTabCleanupTimers = new Map<number, NodeJS.Timeout>();
 
 // async function connectBrowser(
 //   port: number,
@@ -153,66 +152,6 @@ const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 
   throw new Error('Chrome instance failed to start within the timeout period');
 };
 
-const isBlankLikePage = (url?: string) => {
-  if (!url) return true;
-  return url === 'about:blank' || url === 'chrome://new-tab-page/' || url.startsWith('chrome://newtab/');
-};
-
-const cleanupExtraBlankTabs = async (browserWSEndpoint: string, startUrl?: string) => {
-  const browser = await puppeteer.connect({
-    browserWSEndpoint,
-    defaultViewport: null,
-  });
-
-  try {
-    const pages = await browser.pages();
-    if (!pages.length) return;
-
-    const primaryPage = pages.find(page => !isBlankLikePage(page.url())) || pages[0];
-    const blankPages = pages.filter(page => page !== primaryPage && isBlankLikePage(page.url()));
-
-    for (const page of blankPages) {
-      try {
-        await page.close({runBeforeUnload: false});
-      } catch (error) {
-        logger.warn('Failed to close blank page', (error as Error).message);
-      }
-    }
-
-    if (isBlankLikePage(primaryPage.url()) && startUrl) {
-      try {
-        await primaryPage.goto(startUrl, {waitUntil: 'domcontentloaded', timeout: 10000});
-      } catch (error) {
-        logger.warn('Failed to load start page on primary tab', (error as Error).message);
-      }
-    }
-
-    await primaryPage.bringToFront();
-  } finally {
-    await browser.disconnect();
-  }
-};
-
-const stopBlankTabGuardian = (windowId: number) => {
-  const timer = blankTabCleanupTimers.get(windowId);
-  if (timer) {
-    clearInterval(timer);
-    blankTabCleanupTimers.delete(windowId);
-  }
-};
-
-const startBlankTabGuardian = (windowId: number, browserWSEndpoint: string, startUrl?: string) => {
-  stopBlankTabGuardian(windowId);
-  const timer = setInterval(() => {
-    void cleanupExtraBlankTabs(browserWSEndpoint, startUrl).catch(error => {
-      logger.warn(`Blank tab guardian failed for window ${windowId}`, {
-        message: (error as Error).message,
-      });
-    });
-  }, 5000);
-  blankTabCleanupTimers.set(windowId, timer);
-};
-
 export async function openFingerprintWindow(id: number, headless = false) {
   const release = await mutex.acquire();
   let profileLockAcquired = false;
@@ -262,13 +201,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
             browserWSEndpoint: data.webSocketDebuggerUrl,
             defaultViewport: null,
           });
-          try {
-            const pages = await browser.pages();
-            if (pages.length > 0) {
-              const pageToFocus = pages.find(page => !isBlankLikePage(page.url())) || pages[0];
-              await pageToFocus.bringToFront();
-            }
-          } finally {
+          const pages = await browser.pages();
+          if (pages.length > 0) {
+            await pages[0].bringToFront();
             // 取消连接
             await browser.disconnect();
           }
@@ -582,8 +517,6 @@ export async function openFingerprintWindow(id: number, headless = false) {
             : {}),
         });
         await importCloudCookies(chromePort, downloadedProfileData?.cookies);
-        await cleanupExtraBlankTabs(data.webSocketDebuggerUrl, startUrl);
-        startBlankTabGuardian(windowData.id!, data.webSocketDebuggerUrl, startUrl);
         startCloudCookieSync(windowData, chromePort);
         windowStarted = true;
         return {
@@ -717,7 +650,6 @@ export async function resetWindowStatus(id: number) {
 export async function closeFingerprintWindow(id: number, force = false) {
   const window = await WindowDB.getById(id);
   const port = window.port;
-  stopBlankTabGuardian(id);
   stopCloudCookieSync(id);
   if (force && port) {
     try {
