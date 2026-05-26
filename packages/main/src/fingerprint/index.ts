@@ -47,6 +47,7 @@ const mutex = new Mutex();
 const logger = createLogger(WINDOW_LOGGER_LABEL);
 
 const HOST = '127.0.0.1';
+const blankTabCleanupTimers = new Map<number, NodeJS.Timeout>();
 
 // async function connectBrowser(
 //   port: number,
@@ -190,6 +191,26 @@ const cleanupExtraBlankTabs = async (browserWSEndpoint: string, startUrl?: strin
   } finally {
     await browser.disconnect();
   }
+};
+
+const stopBlankTabGuardian = (windowId: number) => {
+  const timer = blankTabCleanupTimers.get(windowId);
+  if (timer) {
+    clearInterval(timer);
+    blankTabCleanupTimers.delete(windowId);
+  }
+};
+
+const startBlankTabGuardian = (windowId: number, browserWSEndpoint: string, startUrl?: string) => {
+  stopBlankTabGuardian(windowId);
+  const timer = setInterval(() => {
+    void cleanupExtraBlankTabs(browserWSEndpoint, startUrl).catch(error => {
+      logger.warn(`Blank tab guardian failed for window ${windowId}`, {
+        message: (error as Error).message,
+      });
+    });
+  }, 5000);
+  blankTabCleanupTimers.set(windowId, timer);
 };
 
 export async function openFingerprintWindow(id: number, headless = false) {
@@ -562,6 +583,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
         });
         await importCloudCookies(chromePort, downloadedProfileData?.cookies);
         await cleanupExtraBlankTabs(data.webSocketDebuggerUrl, startUrl);
+        startBlankTabGuardian(windowData.id!, data.webSocketDebuggerUrl, startUrl);
         startCloudCookieSync(windowData, chromePort);
         windowStarted = true;
         return {
@@ -695,6 +717,7 @@ export async function resetWindowStatus(id: number) {
 export async function closeFingerprintWindow(id: number, force = false) {
   const window = await WindowDB.getById(id);
   const port = window.port;
+  stopBlankTabGuardian(id);
   stopCloudCookieSync(id);
   if (force && port) {
     try {

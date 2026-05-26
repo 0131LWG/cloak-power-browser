@@ -17,7 +17,9 @@ const initWindowStatus = async () => {
   const windows = await WindowDB.all();
   for (let index = 0; index < windows.length; index++) {
     const window = windows[index];
-    if (window.status === 2) {
+    // Recover both running and preparing states on app startup.
+    // `status=3` (preparing) can be left behind when open flow is interrupted.
+    if (window.status === 2 || window.status === 3) {
       await resetWindowStatus(window.id);
     }
   }
