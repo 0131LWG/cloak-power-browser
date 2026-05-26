@@ -91,6 +91,7 @@ export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
 
 export const startCloudSyncEngine = async () => {
   await ensureCloudSyncSchema();
+  await repairWindowRelationsFromCloudIds();
   const config = await cloudApiClient.getConfig();
   if (!config.enabled || flushTimer) {
     return;
@@ -341,6 +342,7 @@ const applySyncEvent = async (event: CloudSyncEvent) => {
   switch (event.entity_type) {
     case 'group':
       await applyEntityUpsertOrDelete('group', cloudId, event.operation, payload, ['name']);
+      await repairWindowGroupReferences(cloudId);
       return;
     case 'proxy':
       await applyEntityUpsertOrDelete('proxy', cloudId, event.operation, payload, [
@@ -600,6 +602,72 @@ const repairWindowProxyReferences = async (proxyCloudId: string) => {
       proxy_id: proxyId,
       updated_at: db.fn.now(),
     });
+};
+
+const repairWindowGroupReferences = async (groupCloudId: string) => {
+  const groupId = await findLocalIdByCloudId('group', groupCloudId);
+  if (!groupId) {
+    return;
+  }
+
+  const hasGroupCloudIdColumn = await db.schema.hasColumn('window', 'group_cloud_id');
+  if (!hasGroupCloudIdColumn) {
+    return;
+  }
+
+  await db('window')
+    .where({group_cloud_id: groupCloudId})
+    .where(builder => {
+      builder.whereNull('group_id').orWhere('group_id', 0);
+    })
+    .update({
+      group_id: groupId,
+      updated_at: db.fn.now(),
+    });
+};
+
+const repairWindowRelationsFromCloudIds = async () => {
+  const hasWindowTable = await db.schema.hasTable('window');
+  if (!hasWindowTable) {
+    return;
+  }
+
+  const hasGroupCloudIdColumn = await db.schema.hasColumn('window', 'group_cloud_id');
+  const hasProxyCloudIdColumn = await db.schema.hasColumn('window', 'proxy_cloud_id');
+  if (!hasGroupCloudIdColumn && !hasProxyCloudIdColumn) {
+    return;
+  }
+
+  const windows = await db('window')
+    .select('id', 'group_id', 'group_cloud_id', 'proxy_id', 'proxy_cloud_id')
+    .where('status', '>', 0);
+
+  for (const row of windows) {
+    const updates: Record<string, unknown> = {};
+
+    if (hasGroupCloudIdColumn && row.group_cloud_id && (!row.group_id || row.group_id === 0)) {
+      const groupId = await findLocalIdByCloudId('group', String(row.group_cloud_id));
+      if (groupId) {
+        updates.group_id = groupId;
+      }
+    }
+
+    if (hasProxyCloudIdColumn && row.proxy_cloud_id && (!row.proxy_id || row.proxy_id === 0)) {
+      const proxyId = await findLocalIdByCloudId('proxy', String(row.proxy_cloud_id));
+      if (proxyId) {
+        updates.proxy_id = proxyId;
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db('window')
+        .where({id: row.id})
+        .update({
+          ...updates,
+          updated_at: db.fn.now(),
+        });
+    }
+  }
 };
 
 const toNullableString = (value: unknown) => {
