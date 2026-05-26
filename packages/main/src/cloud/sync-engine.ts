@@ -109,6 +109,7 @@ export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
 export const startCloudSyncEngine = async () => {
   await ensureCloudSyncSchema();
   await backfillLegacyCloudSyncData();
+  await mergeDuplicateGroupsByName();
   await repairWindowRelationsFromCloudIds();
   const config = await cloudApiClient.getConfig();
   if (!config.enabled || flushTimer) {
@@ -262,6 +263,7 @@ export const rebuildCloudSyncOutboxForWorkspace = async () => {
   }
 
   await backfillLegacyCloudSyncData();
+  await mergeDuplicateGroupsByName();
   await repairWindowRelationsFromCloudIds();
 
   let groupsEnqueued = 0;
@@ -932,6 +934,66 @@ const backfillLegacyCloudSyncData = async () => {
       groupsPatched,
       proxiesPatched,
       windowsPatched,
+    });
+  }
+};
+
+const normalizeGroupNameKey = (name: unknown) => String(name || '').trim().toLowerCase();
+
+const mergeDuplicateGroupsByName = async () => {
+  const hasGroupTable = await db.schema.hasTable('group');
+  const hasWindowTable = await db.schema.hasTable('window');
+  if (!hasGroupTable || !hasWindowTable) {
+    return;
+  }
+
+  const groups = await db('group')
+    .select('id', 'name', 'workspace_id', 'cloud_id', 'created_at')
+    .orderBy('id', 'asc');
+
+  const buckets = new Map<string, Array<Record<string, unknown>>>();
+  for (const group of groups) {
+    const key = `${String(group.workspace_id || '')}::${normalizeGroupNameKey(group.name)}`;
+    if (!normalizeGroupNameKey(group.name)) continue;
+    const list = buckets.get(key) || [];
+    list.push(group as Record<string, unknown>);
+    buckets.set(key, list);
+  }
+
+  let mergedGroups = 0;
+  let reassignedWindows = 0;
+
+  for (const list of buckets.values()) {
+    if (list.length <= 1) continue;
+
+    const canonical =
+      list.find(item => item.cloud_id) ||
+      list[0];
+
+    const canonicalId = Number(canonical.id);
+    const duplicateIds = list
+      .map(item => Number(item.id))
+      .filter(id => id !== canonicalId);
+
+    if (!duplicateIds.length) continue;
+
+    const affected = await db('window')
+      .whereIn('group_id', duplicateIds)
+      .update({
+        group_id: canonicalId,
+        updated_at: db.fn.now(),
+      });
+    reassignedWindows += Number(affected || 0);
+
+    // Keep the canonical group and remove duplicates.
+    await db('group').whereIn('id', duplicateIds).delete();
+    mergedGroups += duplicateIds.length;
+  }
+
+  if (mergedGroups > 0) {
+    logger.info('Merged duplicate groups by name', {
+      mergedGroups,
+      reassignedWindows,
     });
   }
 };
