@@ -152,6 +152,46 @@ const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 
   throw new Error('Chrome instance failed to start within the timeout period');
 };
 
+const isBlankLikePage = (url?: string) => {
+  if (!url) return true;
+  return url === 'about:blank' || url === 'chrome://new-tab-page/' || url.startsWith('chrome://newtab/');
+};
+
+const cleanupExtraBlankTabs = async (browserWSEndpoint: string, startUrl?: string) => {
+  const browser = await puppeteer.connect({
+    browserWSEndpoint,
+    defaultViewport: null,
+  });
+
+  try {
+    const pages = await browser.pages();
+    if (!pages.length) return;
+
+    const primaryPage = pages.find(page => !isBlankLikePage(page.url())) || pages[0];
+    const blankPages = pages.filter(page => page !== primaryPage && isBlankLikePage(page.url()));
+
+    for (const page of blankPages) {
+      try {
+        await page.close({runBeforeUnload: false});
+      } catch (error) {
+        logger.warn('Failed to close blank page', (error as Error).message);
+      }
+    }
+
+    if (isBlankLikePage(primaryPage.url()) && startUrl) {
+      try {
+        await primaryPage.goto(startUrl, {waitUntil: 'domcontentloaded', timeout: 10000});
+      } catch (error) {
+        logger.warn('Failed to load start page on primary tab', (error as Error).message);
+      }
+    }
+
+    await primaryPage.bringToFront();
+  } finally {
+    await browser.disconnect();
+  }
+};
+
 export async function openFingerprintWindow(id: number, headless = false) {
   const release = await mutex.acquire();
   let profileLockAcquired = false;
@@ -201,9 +241,13 @@ export async function openFingerprintWindow(id: number, headless = false) {
             browserWSEndpoint: data.webSocketDebuggerUrl,
             defaultViewport: null,
           });
-          const pages = await browser.pages();
-          if (pages.length > 0) {
-            await pages[0].bringToFront();
+          try {
+            const pages = await browser.pages();
+            if (pages.length > 0) {
+              const pageToFocus = pages.find(page => !isBlankLikePage(page.url())) || pages[0];
+              await pageToFocus.bringToFront();
+            }
+          } finally {
             // 取消连接
             await browser.disconnect();
           }
@@ -482,7 +526,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
         // console.error('stderr: ', str);
       });
 
-      chromeInstance.on('close', async () => {
+      chromeInstance.on('close', () => {
         logger.info(`Chrome process exited at port ${chromePort}, closed time: ${new Date()}`);
         if (proxyType === 'socks5') {
           (proxyServer as Server<typeof IncomingMessage, typeof ServerResponse>)?.close(() => {
@@ -493,7 +537,9 @@ export async function openFingerprintWindow(id: number, headless = false) {
             logger.info('Http Proxy server was closed.');
           });
         }
-        await closeFingerprintWindow(id, false);
+        void closeFingerprintWindow(id, false).catch(error => {
+          logger.error(`Failed to close fingerprint window after process exit: ${id}`, error);
+        });
       });
 
       await waitForChromeReady(chromePort, id, 30);
@@ -515,6 +561,7 @@ export async function openFingerprintWindow(id: number, headless = false) {
             : {}),
         });
         await importCloudCookies(chromePort, downloadedProfileData?.cookies);
+        await cleanupExtraBlankTabs(data.webSocketDebuggerUrl, startUrl);
         startCloudCookieSync(windowData, chromePort);
         windowStarted = true;
         return {
@@ -664,9 +711,21 @@ export async function closeFingerprintWindow(id: number, force = false) {
       logger.error(error);
     }
   }
-  await uploadCloudProfileData(window, getProfileDataDir(window));
+  try {
+    await uploadCloudProfileData(window, getProfileDataDir(window));
+  } catch (error) {
+    logger.warn(`Failed to upload cloud profile data for window ${id}`, {
+      message: (error as Error).message,
+    });
+  }
   await WindowDB.update(id, {...window, status: 1, port: null, pid: null});
-  await releaseProfileLock(id);
+  try {
+    await releaseProfileLock(id);
+  } catch (error) {
+    logger.warn(`Failed to release profile lock for window ${id}`, {
+      message: (error as Error).message,
+    });
+  }
   const win = getMainWindow();
   if (win) {
     win.webContents.send('window-closed', id);
