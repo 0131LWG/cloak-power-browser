@@ -18,6 +18,21 @@ let isFlushing = false;
 let isPulling = false;
 let maxPendingOutbox = 0;
 let lastSyncActivityAt = 0;
+const hasUpdatedAtColumnCache = new Map<string, boolean>();
+
+const updateWithTimestampIfSupported = async (
+  tableName: string,
+  where: Record<string, unknown>,
+  payload: Record<string, unknown>,
+) => {
+  let hasUpdatedAt = hasUpdatedAtColumnCache.get(tableName);
+  if (hasUpdatedAt === undefined) {
+    hasUpdatedAt = await db.schema.hasColumn(tableName, 'updated_at');
+    hasUpdatedAtColumnCache.set(tableName, hasUpdatedAt);
+  }
+  const updatePayload = hasUpdatedAt ? {...payload, updated_at: db.fn.now()} : payload;
+  await db(tableName).where(where).update(updatePayload);
+};
 
 export const flushSyncOutbox = async (limit = DEFAULT_FLUSH_LIMIT) => {
   await ensureCloudSyncSchema();
@@ -261,12 +276,11 @@ export const rebuildCloudSyncOutboxForWorkspace = async () => {
   for (const group of groups) {
     const cloudId = group.cloud_id || randomUUID();
     if (!group.cloud_id || !group.workspace_id) {
-      await db('group').where({id: group.id}).update({
+      await updateWithTimestampIfSupported('group', {id: group.id}, {
         cloud_id: cloudId,
         workspace_id: group.workspace_id || config.workspaceId,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
     }
     const latestGroup = await db('group').where({id: group.id}).first();
@@ -286,12 +300,11 @@ export const rebuildCloudSyncOutboxForWorkspace = async () => {
   for (const proxy of proxies) {
     const cloudId = proxy.cloud_id || randomUUID();
     if (!proxy.cloud_id || !proxy.workspace_id) {
-      await db('proxy').where({id: proxy.id}).update({
+      await updateWithTimestampIfSupported('proxy', {id: proxy.id}, {
         cloud_id: cloudId,
         workspace_id: proxy.workspace_id || config.workspaceId,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
     }
     const latestProxy = await db('proxy').where({id: proxy.id}).first();
@@ -312,12 +325,11 @@ export const rebuildCloudSyncOutboxForWorkspace = async () => {
   for (const windowData of windows) {
     const cloudId = windowData.cloud_id || randomUUID();
     if (!windowData.cloud_id || !windowData.workspace_id) {
-      await db('window').where({id: windowData.id}).update({
+      await updateWithTimestampIfSupported('window', {id: windowData.id}, {
         cloud_id: cloudId,
         workspace_id: windowData.workspace_id || config.workspaceId,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
     }
     const latestWindow = await db('window').where({id: windowData.id}).first();
@@ -796,12 +808,7 @@ const repairWindowRelationsFromCloudIds = async () => {
     }
 
     if (Object.keys(updates).length > 0) {
-      await db('window')
-        .where({id: row.id})
-        .update({
-          ...updates,
-          updated_at: db.fn.now(),
-        });
+      await updateWithTimestampIfSupported('window', {id: row.id}, updates);
       updatedWindows++;
     }
   }
@@ -833,14 +840,11 @@ const backfillLegacyCloudSyncData = async () => {
     const shouldPatch = !group.cloud_id || !group.workspace_id;
     if (!shouldPatch) continue;
 
-    await db('group')
-      .where({id: group.id})
-      .update({
+    await updateWithTimestampIfSupported('group', {id: group.id}, {
         cloud_id: nextCloudId,
         workspace_id: nextWorkspaceId,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
 
     const latestGroup = await db('group').where({id: group.id}).first();
@@ -859,14 +863,11 @@ const backfillLegacyCloudSyncData = async () => {
     const shouldPatch = !proxy.cloud_id || !proxy.workspace_id;
     if (!shouldPatch) continue;
 
-    await db('proxy')
-      .where({id: proxy.id})
-      .update({
+    await updateWithTimestampIfSupported('proxy', {id: proxy.id}, {
         cloud_id: nextCloudId,
         workspace_id: nextWorkspaceId,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
 
     const latestProxy = await db('proxy').where({id: proxy.id}).first();
@@ -907,16 +908,13 @@ const backfillLegacyCloudSyncData = async () => {
       (windowData.proxy_id && !windowData.proxy_cloud_id && Boolean(nextProxyCloudId));
     if (!shouldPatch) continue;
 
-    await db('window')
-      .where({id: windowData.id})
-      .update({
+    await updateWithTimestampIfSupported('window', {id: windowData.id}, {
         cloud_id: nextCloudId,
         workspace_id: nextWorkspaceId,
         group_cloud_id: nextGroupCloudId || null,
         proxy_cloud_id: nextProxyCloudId || null,
         sync_dirty: true,
         updated_by_device_id: config.deviceId,
-        updated_at: db.fn.now(),
       });
 
     const latestWindow = await db('window').where({id: windowData.id}).first();
