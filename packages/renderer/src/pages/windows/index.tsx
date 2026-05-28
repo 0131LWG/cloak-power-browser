@@ -58,6 +58,20 @@ interface CloudLockState {
   locked_at?: string;
   heartbeat_at?: string;
 }
+const CLOUD_LOCK_STALE_MS = 60 * 1000;
+
+const parseCloudLockTime = (lock: CloudLockState) => {
+  const source = lock.heartbeat_at || lock.locked_at;
+  if (!source) return null;
+  const timestamp = new Date(source).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+const isCloudLockFresh = (lock: CloudLockState) => {
+  const lockTime = parseCloudLockTime(lock);
+  if (!lockTime) return false;
+  return Date.now() - lockTime <= CLOUD_LOCK_STALE_MS;
+};
 
 const getWindowNameNumber = (name?: string) => {
   const match = name?.match(/\d+/);
@@ -104,6 +118,7 @@ const Windows = () => {
   const [selectedProxy, setSelectedProxy] = useState<number>();
   const [cloudSyncDeviceId, setCloudSyncDeviceId] = useState('');
   const [cloudLocks, setCloudLocks] = useState(new Map<string, CloudLockState>());
+  const [releasingCloudLocks, setReleasingCloudLocks] = useState(false);
   const [cloudSyncProgress, setCloudSyncProgress] = useState<{
     enabled: boolean;
     pendingOutbox: number;
@@ -472,7 +487,7 @@ const Windows = () => {
       const result = await SyncBridge.getCloudSyncLocks();
       const nextLocks = new Map<string, CloudLockState>();
       result?.data?.forEach((lock: CloudLockState) => {
-        if (lock.profile_cloud_id) {
+        if (lock.profile_cloud_id && isCloudLockFresh(lock)) {
           nextLocks.set(lock.profile_cloud_id, lock);
         }
       });
@@ -493,6 +508,20 @@ const Windows = () => {
       });
     } catch {
       setCloudSyncProgress(prev => ({...prev, syncing: false}));
+    }
+  };
+
+  const releaseCloudLocks = async () => {
+    setReleasingCloudLocks(true);
+    try {
+      await SyncBridge.releaseCloudSyncLocks();
+      await fetchCloudLocks();
+      await fetchWindowData();
+      messageApi.success('Cloud locks cleared');
+    } catch (error) {
+      messageApi.error(`Failed to clear cloud locks: ${(error as Error).message}`);
+    } finally {
+      setReleasingCloudLocks(false);
     }
   };
 
@@ -914,6 +943,15 @@ const Windows = () => {
           >
             {t('refresh')}
           </Button>
+          {cloudSyncProgress.enabled && (
+            <Button
+              type="default"
+              loading={releasingCloudLocks}
+              onClick={releaseCloudLocks}
+            >
+              清理云锁
+            </Button>
+          )}
           {cloudSyncProgress.enabled && cloudSyncProgress.pendingOutbox > 0 && (
             <Progress
               percent={cloudSyncProgress.progressPercent}

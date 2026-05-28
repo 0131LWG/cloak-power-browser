@@ -95,6 +95,10 @@ export const SyncBridge = {
     return ipcRenderer.invoke('cloud-sync-rebuild-outbox');
   },
 
+  releaseCloudSyncLocks: () => {
+    return ipcRenderer.invoke('cloud-sync-release-locks');
+  },
+
   // Listen to global shortcuts from main process
   onShortcutStart: (callback: () => void) => {
     const listener = () => callback();

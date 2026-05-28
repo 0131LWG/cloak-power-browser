@@ -128,7 +128,7 @@ const getAvailablePort = async () => {
   throw new Error('Failed to find a free port after multiple attempts');
 };
 
-const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 30) => {
+const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 60) => {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -141,7 +141,12 @@ const waitForChromeReady = async (chromePort: number, id: number, maxAttempts = 
         return true;
       }
     } catch (error) {
-      logger.error('连接失败', (error as Error).message);
+      const errorCode = (error as {code?: string})?.code;
+      if (errorCode === 'ECONNREFUSED' || errorCode === 'ECONNRESET' || errorCode === 'ETIMEDOUT') {
+        logger.warn(`Chrome not ready yet for window ${id} on port ${chromePort}: ${errorCode}`);
+      } else {
+        logger.error('连接失败', (error as Error).message);
+      }
       // 连接失败，继续等待
     }
 
@@ -498,9 +503,8 @@ export async function openFingerprintWindow(id: number, headless = false) {
         });
       });
 
-      await waitForChromeReady(chromePort, id, 30);
-
       try {
+        await waitForChromeReady(chromePort, id, 60);
         const browserURL = `http://${HOST}:${chromePort}`;
         const {data} = await api.get(browserURL + '/json/version');
         await WindowDB.update(windowData.id, {

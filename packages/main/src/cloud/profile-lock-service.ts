@@ -8,6 +8,7 @@ import type {ProfileLockResult} from './types';
 
 const logger = createLogger(SERVICE_LOGGER_LABEL);
 const HEARTBEAT_INTERVAL_MS = 15000;
+const RELEASE_RETRY_DELAY_MS = 5000;
 
 type HeldLock = {
   profileCloudId: string;
@@ -17,6 +18,7 @@ type HeldLock = {
 };
 
 const heldLocks = new Map<number, HeldLock>();
+const releaseRetryTimers = new Map<number, NodeJS.Timeout>();
 
 const isCloudLockedWindow = (windowData: DB.Window) => Boolean(windowData.cloud_id);
 
@@ -165,10 +167,11 @@ export const releaseProfileLock = async (localWindowId: number) => {
 
   if (lock.timer) {
     clearInterval(lock.timer);
+    lock.timer = undefined;
   }
-  heldLocks.delete(localWindowId);
 
   if (!config.enabled) {
+    heldLocks.delete(localWindowId);
     return;
   }
 
@@ -178,8 +181,23 @@ export const releaseProfileLock = async (localWindowId: number) => {
       device_id: config.deviceId,
       app_instance_id: `${process.pid}`,
     });
+    const retryTimer = releaseRetryTimers.get(localWindowId);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      releaseRetryTimers.delete(localWindowId);
+    }
+    heldLocks.delete(localWindowId);
   } catch (error) {
     logger.error(`Profile lock release failed for window ${localWindowId}`, error);
+    if (!releaseRetryTimers.has(localWindowId)) {
+      const retryTimer = setTimeout(() => {
+        releaseRetryTimers.delete(localWindowId);
+        releaseProfileLock(localWindowId).catch(retryError => {
+          logger.error(`Profile lock release retry failed for window ${localWindowId}`, retryError);
+        });
+      }, RELEASE_RETRY_DELAY_MS);
+      releaseRetryTimers.set(localWindowId, retryTimer);
+    }
   }
 };
 

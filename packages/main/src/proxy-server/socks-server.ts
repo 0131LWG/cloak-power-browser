@@ -61,13 +61,6 @@ class HttpProxy extends EventEmitter {
       logger.error('Proxy server error:', error);
     });
 
-    process.on('uncaughtException', error => {
-      if (error instanceof Error && 'code' in error && error.code === 'ECONNRESET') {
-        logger.error('Connection reset by peer');
-      } else {
-        logger.error('Uncaught Exception:', error);
-      }
-    });
   }
 
   _request(
