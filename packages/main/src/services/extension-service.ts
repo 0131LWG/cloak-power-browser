@@ -11,6 +11,7 @@ import {getSettings} from '../utils/get-settings';
 import {randomUUID} from 'crypto';
 import {getCloudSyncConfig} from '../cloud/config';
 import {enqueueSyncOutbox} from '../cloud/sync-outbox';
+import {createLogger} from '../../../shared/utils/logger';
 
 type ExtensionManifest = {
   name?: string;
@@ -31,6 +32,8 @@ type PersistOptions = {
 
 const ZIP_SIGNATURE = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 const CHROME_PROD_VERSION = '131.0.6778.265';
+const SERVICE_LOGGER_LABEL = 'extension-service';
+const logger = createLogger(SERVICE_LOGGER_LABEL);
 
 const getProxyEnv = () =>
   process.env.HTTPS_PROXY ||
@@ -274,7 +277,7 @@ const persistInstalledExtension = async ({
   sourceUrl,
   chromeExtensionId,
   existingExtension,
-  defaultDistributionMode = 'global',
+  defaultDistributionMode = 'manual',
 }: PersistOptions) => {
   const manifest = await readManifest(manifestDir);
   const name = await resolveManifestText(manifest.name, manifestDir, manifest.default_locale);
@@ -493,7 +496,7 @@ export const initExtensionService = () => {
       workspace_id: extension.workspace_id || cloudConfig.workspaceId,
       sync_dirty: cloudConfig.enabled,
       updated_by_device_id: cloudConfig.deviceId,
-      distribution_mode: extension.distribution_mode ?? 'global',
+      distribution_mode: extension.distribution_mode ?? 'manual',
       auto_update:
         typeof extension.auto_update === 'boolean' ? extension.auto_update : extension.auto_update !== 0,
       updated_at: db.fn.now() as unknown as string,
@@ -671,10 +674,15 @@ export const initExtensionService = () => {
         success: true,
         message: '同步成功',
       };
-    } catch {
+    } catch (error) {
+      logger.error('extension-sync-windows failed', {
+        extensionId,
+        incomingCount: windowIds.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         success: false,
-        message: '同步失败',
+        message: error instanceof Error && error.message ? error.message : '同步失败',
       };
     }
   });

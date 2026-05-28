@@ -1,6 +1,20 @@
 import {db} from '.';
 import type {DB} from '../../../shared/types/db';
 
+const SQLITE_WHERE_IN_BATCH_SIZE = 500;
+
+const chunkArray = <T>(items: T[], size: number): T[][] => {
+  if (!items.length) {
+    return [];
+  }
+
+  const batches: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+  return batches;
+};
+
 const normalizeExtension = (extension: DB.Extension): DB.Extension => {
   return {
     ...extension,
@@ -61,10 +75,17 @@ const insertExtensionWindows = async (id: number, windows: number[]) => {
     return [];
   }
 
-  const existingRows = await db('window_extension')
-    .where({extension_id: id})
-    .whereIn('window_id', windows)
-    .select('window_id');
+  const existingRows: Array<{window_id: number}> = [];
+  const windowIdBatches = chunkArray(windows, SQLITE_WHERE_IN_BATCH_SIZE);
+
+  for (const batch of windowIdBatches) {
+    const rows = await db('window_extension')
+      .where({extension_id: id})
+      .whereIn('window_id', batch)
+      .select('window_id');
+    existingRows.push(...(rows as Array<{window_id: number}>));
+  }
+
   const existingIds = new Set(existingRows.map(row => row.window_id));
   const payload = windows
     .filter(windowId => !existingIds.has(windowId))
@@ -74,7 +95,14 @@ const insertExtensionWindows = async (id: number, windows: number[]) => {
     return [];
   }
 
-  return await db('window_extension').insert(payload);
+  const payloadBatches = chunkArray(payload, SQLITE_WHERE_IN_BATCH_SIZE);
+  const insertedResults: unknown[] = [];
+  for (const batch of payloadBatches) {
+    const result = await db('window_extension').insert(batch);
+    insertedResults.push(result);
+  }
+
+  return insertedResults;
 };
 
 const getExtensionsByWindowId = async (windowId: number) => {
@@ -97,16 +125,34 @@ const deleteExtensionWindows = async (id: number, windowIds: number[]) => {
     return 0;
   }
 
-  return await db('window_extension')
-    .where({extension_id: id})
-    .whereIn('window_id', windowIds)
-    .delete();
+  let deletedCount = 0;
+  const windowIdBatches = chunkArray(windowIds, SQLITE_WHERE_IN_BATCH_SIZE);
+
+  for (const batch of windowIdBatches) {
+    const deleted = await db('window_extension')
+      .where({extension_id: id})
+      .whereIn('window_id', batch)
+      .delete();
+    deletedCount += Number(deleted) || 0;
+  }
+
+  return deletedCount;
 };
 
 const deleteWindowReleted = async (windowIds: number | number[]) => {
-  return await db('window_extension')
-    .whereIn('window_id', Array.isArray(windowIds) ? windowIds : [windowIds])
-    .delete();
+  const targetIds = Array.isArray(windowIds) ? windowIds : [windowIds];
+  if (!targetIds.length) {
+    return 0;
+  }
+
+  let deletedCount = 0;
+  const windowIdBatches = chunkArray(targetIds, SQLITE_WHERE_IN_BATCH_SIZE);
+  for (const batch of windowIdBatches) {
+    const deleted = await db('window_extension').whereIn('window_id', batch).delete();
+    deletedCount += Number(deleted) || 0;
+  }
+
+  return deletedCount;
 };
 
 const getExtensionWindows = async (id: number) => {
