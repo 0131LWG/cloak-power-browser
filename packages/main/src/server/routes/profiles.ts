@@ -10,7 +10,11 @@ router.get('', async (req, res) => {
 });
 
 router.get('/open', async (req, res) => {
-  const windowId = req.query.windowId as unknown as number;
+  const windowId = Number(req.query.windowId);
+  if (!Number.isInteger(windowId) || windowId <= 0) {
+    res.status(400).send({error: 'Invalid windowId'});
+    return;
+  }
   const window = await WindowDB.getById(windowId);
   const result = await openFingerprintWindow(windowId);
 
@@ -21,7 +25,11 @@ router.get('/open', async (req, res) => {
 });
 
 router.get('/close', async (req, res) => {
-  const windowId = req.query.windowId as unknown as number;
+  const windowId = Number(req.query.windowId);
+  if (!Number.isInteger(windowId) || windowId <= 0) {
+    res.status(400).send({error: 'Invalid windowId'});
+    return;
+  }
   const window = await WindowDB.getById(windowId);
   await closeFingerprintWindow(windowId, true);
   res.send({
